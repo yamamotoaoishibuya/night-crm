@@ -442,13 +442,16 @@ export default function Home() {
         <form className="loginCard" onSubmit={signIn}>
           <div className="logo">Night CRM</div>
           <p className="muted">店舗専用 顧客管理</p>
-          <label>ログインID</label>
+          <label>ログインIDまたは管理者メール</label>
           <input
             value={login}
-            onChange={(e) => setLogin(e.target.value.replace(/\D/g, "").slice(0, 3))}
-            inputMode="numeric"
+            onChange={(e) => {
+              const value = e.target.value;
+              setLogin(value.includes("@") ? value : value.replace(/\D/g, "").slice(0, 3));
+            }}
+            inputMode="text"
             autoComplete="username"
-            placeholder="1〜3桁の番号"
+            placeholder="キャスト：1〜3桁 / 管理者：メールアドレス"
           />
           <label>パスワード</label>
           <input
