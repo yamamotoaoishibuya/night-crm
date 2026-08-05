@@ -25,6 +25,7 @@ export default function Home() {
   const [newCast, setNewCast] = useState(emptyCast);
   const [credentialModal, setCredentialModal] = useState(null);
   const [passwordModal, setPasswordModal] = useState(false);
+  const [hiddenModal, setHiddenModal] = useState(false);
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [message, setMessage] = useState("");
@@ -139,6 +140,27 @@ export default function Home() {
     [profiles]
   );
 
+
+  const hiddenCasts = useMemo(
+    () =>
+      profiles
+        .filter((item) => item.role === "cast" && !item.is_active)
+        .sort((a, b) => {
+          const aNumber = Number.parseInt(a.login_id, 10);
+          const bNumber = Number.parseInt(b.login_id, 10);
+
+          if (Number.isNaN(aNumber) && Number.isNaN(bNumber)) {
+            return String(a.display_name || "").localeCompare(String(b.display_name || ""), "ja");
+          }
+          if (Number.isNaN(aNumber)) return 1;
+          if (Number.isNaN(bNumber)) return -1;
+          if (aNumber !== bNumber) return aNumber - bNumber;
+
+          return String(a.display_name || "").localeCompare(String(b.display_name || ""), "ja");
+        }),
+    [profiles]
+  );
+
   const castCounts = useMemo(() => {
     const counts = {};
     for (const customer of customers) counts[customer.owner_id] = (counts[customer.owner_id] || 0) + 1;
@@ -146,7 +168,9 @@ export default function Home() {
   }, [customers]);
 
   function castName(id) {
-    return profiles.find((item) => item.id === id)?.display_name || "未設定";
+    const item = profiles.find((profileItem) => profileItem.id === id);
+    if (!item) return "未設定";
+    return item.is_active ? item.display_name : `${item.display_name}（非表示）`;
   }
 
   const globalResults = useMemo(() => {
@@ -247,6 +271,64 @@ export default function Home() {
         loginId: cast.login_id,
         password: result.temporaryPassword
       });
+      await loadApp();
+    } catch (error) {
+      setMessage(error.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function hideCast(cast) {
+    if (!window.confirm(
+      `${cast.display_name}を非表示にしますか？\n顧客情報は残り、このログインIDは新規登録で再利用できます。`
+    )) return;
+
+    setBusy(true);
+    setMessage("");
+
+    try {
+      const response = await fetch("/api/admin/hide-cast", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`
+        },
+        body: JSON.stringify({ userId: cast.id })
+      });
+
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "非表示にできませんでした。");
+
+      setSelectedCastId("");
+      setMessage(`${result.displayName || cast.display_name}を非表示にしました。`);
+      await loadApp();
+    } catch (error) {
+      setMessage(error.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function restoreCast(cast) {
+    setBusy(true);
+    setMessage("");
+
+    try {
+      const response = await fetch("/api/admin/restore-cast", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`
+        },
+        body: JSON.stringify({ userId: cast.id })
+      });
+
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "再表示できませんでした。");
+
+      setHiddenModal(false);
+      setMessage(`${result.displayName || cast.display_name}を再表示しました。`);
       await loadApp();
     } catch (error) {
       setMessage(error.message);
@@ -408,7 +490,11 @@ export default function Home() {
           <div className="muted small">{profile?.display_name}・{isAdmin ? "管理者" : "キャスト"}</div>
         </div>
         <div className="headerActions">
-          <button className="secondary" onClick={() => setPasswordModal(true)}>パスワード変更</button>
+          {!isAdmin && (
+            <button className="secondary" onClick={() => setPasswordModal(true)}>
+              パスワード変更
+            </button>
+          )}
           <button className="secondary" onClick={signOut}>ログアウト</button>
         </div>
       </header>
@@ -439,7 +525,12 @@ export default function Home() {
                 <h2>キャスト一覧</h2>
                 <span className="muted">ログインIDの小さい順・名前をタップすると顧客一覧が開きます</span>
               </div>
-              <button className="primary" onClick={() => setCastModal(true)}>＋ キャスト追加</button>
+              <div className="sectionActions">
+                <button className="secondary" onClick={() => setHiddenModal(true)}>
+                  非表示キャスト（{hiddenCasts.length}）
+                </button>
+                <button className="primary" onClick={() => setCastModal(true)}>＋ キャスト追加</button>
+              </div>
             </div>
 
             <div className="castGrid">
@@ -460,9 +551,14 @@ export default function Home() {
                     </div>
                     <div className="chevron">›</div>
                   </button>
-                  <button className="resetButton" onClick={() => resetCastPassword(cast)}>
-                    パスワード再発行
-                  </button>
+                  <div className="castCardActions">
+                    <button className="resetButton" onClick={() => resetCastPassword(cast)}>
+                      パスワード再発行
+                    </button>
+                    <button className="hideButton" onClick={() => hideCast(cast)}>
+                      非表示にする
+                    </button>
+                  </div>
                 </article>
               ))}
             </div>
@@ -492,6 +588,48 @@ export default function Home() {
           </>
         )}
       </main>
+
+
+      {hiddenModal && (
+        <div className="modalBackdrop" onMouseDown={() => setHiddenModal(false)}>
+          <div className="modal hiddenCastModal" onMouseDown={(e) => e.stopPropagation()}>
+            <div className="modalHeader">
+              <div>
+                <h2>非表示キャスト</h2>
+                <p className="muted small">
+                  顧客情報は残っています。ログインIDは新しいキャストに再利用できます。
+                </p>
+              </div>
+              <button type="button" className="secondary" onClick={() => setHiddenModal(false)}>
+                閉じる
+              </button>
+            </div>
+
+            {hiddenCasts.length === 0 ? (
+              <div className="empty">非表示のキャストはいません。</div>
+            ) : (
+              <div className="hiddenCastList">
+                {hiddenCasts.map((cast) => (
+                  <article className="hiddenCastItem" key={cast.id}>
+                    <div className="castNumberBadge">
+                      <span>No.</span>
+                      <strong>{cast.login_id}</strong>
+                    </div>
+                    <div className="hiddenCastInfo">
+                      <strong>{cast.display_name}</strong>
+                      <span>{castCounts[cast.id] || 0}名の顧客情報を保持中</span>
+                      <small>ログインID：{cast.login_id}</small>
+                    </div>
+                    <button className="primary" onClick={() => restoreCast(cast)} disabled={busy}>
+                      再表示
+                    </button>
+                  </article>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {castModal && (
         <div className="modalBackdrop" onMouseDown={() => setCastModal(false)}>

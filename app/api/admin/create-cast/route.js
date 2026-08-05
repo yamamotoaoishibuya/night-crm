@@ -46,6 +46,7 @@ export async function POST(request) {
       .from("profiles")
       .select("id")
       .eq("login_id", loginId)
+      .eq("is_active", true)
       .maybeSingle();
 
     if (duplicate) {

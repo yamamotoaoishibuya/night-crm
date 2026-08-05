@@ -62,3 +62,20 @@ h1,h2{margin:0}.globalSearch{position:sticky;top:72px;z-index:19;padding:11px 16
   .castNumberBadge{width:58px;min-height:58px}
   .castNumberBadge strong{font-size:20px}
 }
+
+.sectionActions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.castCardActions{display:grid;grid-template-columns:1fr 1fr;border-top:1px solid var(--line)}
+.castCardActions .resetButton{border-top:0}
+.hideButton{border:0;border-left:1px solid var(--line);background:#171522;color:#ffb7c0;padding:10px 12px}
+.hiddenCastModal{max-width:720px}
+.hiddenCastList{display:grid;gap:10px;margin-top:16px}
+.hiddenCastItem{display:grid;grid-template-columns:72px 1fr auto;gap:12px;align-items:center;padding:14px;border:1px solid var(--line);border-radius:16px;background:#0a192a}
+.hiddenCastInfo{display:flex;flex-direction:column;gap:4px;min-width:0}
+.hiddenCastInfo span{color:var(--muted);font-size:13px}
+.hiddenCastInfo small{color:#7191b4}
+@media(max-width:680px){
+  .sectionActions{width:100%;justify-content:stretch}
+  .sectionActions button{flex:1}
+  .hiddenCastItem{grid-template-columns:60px 1fr}
+  .hiddenCastItem .primary{grid-column:1/-1;width:100%}
+}
