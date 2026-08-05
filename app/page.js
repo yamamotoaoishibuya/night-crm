@@ -69,7 +69,21 @@ export default function Home() {
       .select("id, login_id, display_name, role, is_active, must_change_password")
       .order("display_name");
 
-    setProfiles(people || []);
+    const sortedPeople = [...(people || [])].sort((a, b) => {
+      const aNumber = Number.parseInt(a.login_id, 10);
+      const bNumber = Number.parseInt(b.login_id, 10);
+
+      if (Number.isNaN(aNumber) && Number.isNaN(bNumber)) {
+        return String(a.display_name || "").localeCompare(String(b.display_name || ""), "ja");
+      }
+      if (Number.isNaN(aNumber)) return 1;
+      if (Number.isNaN(bNumber)) return -1;
+      if (aNumber !== bNumber) return aNumber - bNumber;
+
+      return String(a.display_name || "").localeCompare(String(b.display_name || ""), "ja");
+    });
+
+    setProfiles(sortedPeople);
     if (me.role === "cast") setSelectedCastId(me.id);
     await loadCustomers();
     setBusy(false);
@@ -106,7 +120,22 @@ export default function Home() {
 
   const isAdmin = profile?.role === "admin";
   const activeCasts = useMemo(
-    () => profiles.filter((item) => item.role === "cast" && item.is_active),
+    () =>
+      profiles
+        .filter((item) => item.role === "cast" && item.is_active)
+        .sort((a, b) => {
+          const aNumber = Number.parseInt(a.login_id, 10);
+          const bNumber = Number.parseInt(b.login_id, 10);
+
+          if (Number.isNaN(aNumber) && Number.isNaN(bNumber)) {
+            return String(a.display_name || "").localeCompare(String(b.display_name || ""), "ja");
+          }
+          if (Number.isNaN(aNumber)) return 1;
+          if (Number.isNaN(bNumber)) return -1;
+          if (aNumber !== bNumber) return aNumber - bNumber;
+
+          return String(a.display_name || "").localeCompare(String(b.display_name || ""), "ja");
+        }),
     [profiles]
   );
 
@@ -125,7 +154,8 @@ export default function Home() {
     if (!word) return [];
     return customers.filter((customer) =>
       [customer.name, customer.line_name, customer.phone, customer.job, customer.rank,
-       customer.favorite_drink, customer.memo, castName(customer.owner_id)]
+       customer.favorite_drink, customer.memo, castName(customer.owner_id),
+       profiles.find((item) => item.id === customer.owner_id)?.login_id]
         .filter(Boolean).join(" ").toLowerCase().includes(word)
     );
   }, [customers, globalQuery, profiles]);
@@ -386,7 +416,7 @@ export default function Home() {
       {isAdmin && (
         <section className="globalSearch">
           <input value={globalQuery} onChange={(e) => setGlobalQuery(e.target.value)}
-            placeholder="全顧客を検索（名前・LINE・電話・メモ・担当キャスト）" />
+            placeholder="全顧客を検索（名前・LINE・電話・メモ・担当キャスト・ログインID）" />
         </section>
       )}
 
@@ -405,7 +435,10 @@ export default function Home() {
         ) : !selectedCastId && isAdmin ? (
           <>
             <div className="sectionTitle">
-              <div><h2>キャスト一覧</h2><span className="muted">名前をタップすると顧客一覧が開きます</span></div>
+              <div>
+                <h2>キャスト一覧</h2>
+                <span className="muted">ログインIDの小さい順・名前をタップすると顧客一覧が開きます</span>
+              </div>
               <button className="primary" onClick={() => setCastModal(true)}>＋ キャスト追加</button>
             </div>
 
@@ -413,7 +446,10 @@ export default function Home() {
               {activeCasts.map((cast) => (
                 <article className="castFolder" key={cast.id}>
                   <button className="folderOpen" onClick={() => openCast(cast.id)}>
-                    <div className="folderIcon">▰</div>
+                    <div className="castNumberBadge">
+                      <span>No.</span>
+                      <strong>{cast.login_id}</strong>
+                    </div>
                     <div className="castFolderText">
                       <strong>{cast.display_name}</strong>
                       <span>{castCounts[cast.id] || 0}名の顧客</span>

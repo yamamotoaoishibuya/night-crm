@@ -32,7 +32,7 @@ h1,h2{margin:0}.globalSearch{position:sticky;top:72px;z-index:19;padding:11px 16
 
 .headerActions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
 .castFolder{display:block;padding:0;overflow:hidden}
-.folderOpen{width:100%;display:grid;grid-template-columns:48px 1fr auto;align-items:center;gap:12px;text-align:left;border:0;background:transparent;color:var(--text);padding:17px}
+.folderOpen{width:100%;display:grid;grid-template-columns:72px 1fr auto;align-items:center;gap:12px;text-align:left;border:0;background:transparent;color:var(--text);padding:17px}
 .resetButton{width:100%;border:0;border-top:1px solid var(--line);background:#0a192a;color:#9fcaff;padding:10px 12px}
 .statusPending{color:#ffc675!important}.statusDone{color:#73dca3!important}
 .credentialModal{max-width:540px}.warningText{color:#ffc675;line-height:1.6}
@@ -40,3 +40,25 @@ h1,h2{margin:0}.globalSearch{position:sticky;top:72px;z-index:19;padding:11px 16
 .credentialRow div{min-width:0;display:flex;flex-direction:column;gap:5px}.credentialRow span{font-size:12px;color:var(--muted)}
 .credentialRow strong{font-size:17px;overflow-wrap:anywhere;user-select:all}
 @media(max-width:680px){.headerActions{gap:5px}.headerActions .secondary{padding:9px 10px;font-size:12px}.credentialRow{align-items:flex-start;flex-direction:column}.credentialRow .secondary{width:100%}}
+
+.castNumberBadge{
+  width:64px;
+  min-height:64px;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  gap:1px;
+  border:1px solid #2f628f;
+  border-radius:15px;
+  background:linear-gradient(145deg,#0f3152,#0b223a);
+  color:#bfe0ff;
+  box-shadow:inset 0 0 18px rgba(79,166,255,.08);
+}
+.castNumberBadge span{font-size:11px;letter-spacing:.08em;color:#7dbbf2}
+.castNumberBadge strong{font-size:22px;line-height:1.05;color:#fff}
+@media(max-width:680px){
+  .folderOpen{grid-template-columns:66px 1fr auto}
+  .castNumberBadge{width:58px;min-height:58px}
+  .castNumberBadge strong{font-size:20px}
+}
