@@ -29,3 +29,14 @@ h1,h2{margin:0}.globalSearch{position:sticky;top:72px;z-index:19;padding:11px 16
 .field span{display:block;font-size:13px;color:var(--muted);margin:16px 0 7px}.wide{grid-column:1/-1}textarea{min-height:110px;resize:vertical}.modalActions{margin-top:20px}
 .hint{color:var(--muted);font-size:13px;line-height:1.6;margin:16px 0 0}
 @media(max-width:680px){.globalSearch{top:71px}.formGrid{grid-template-columns:1fr}.wide{grid-column:auto}.modal{padding:16px}.sectionTitle,.castPageHeader{align-items:flex-start}.castGrid{grid-template-columns:1fr}.customerTop{align-items:center}header h1{font-size:20px}}
+
+.headerActions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.castFolder{display:block;padding:0;overflow:hidden}
+.folderOpen{width:100%;display:grid;grid-template-columns:48px 1fr auto;align-items:center;gap:12px;text-align:left;border:0;background:transparent;color:var(--text);padding:17px}
+.resetButton{width:100%;border:0;border-top:1px solid var(--line);background:#0a192a;color:#9fcaff;padding:10px 12px}
+.statusPending{color:#ffc675!important}.statusDone{color:#73dca3!important}
+.credentialModal{max-width:540px}.warningText{color:#ffc675;line-height:1.6}
+.credentialRow{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px;margin-top:12px;border:1px solid var(--line);border-radius:14px;background:#081625}
+.credentialRow div{min-width:0;display:flex;flex-direction:column;gap:5px}.credentialRow span{font-size:12px;color:var(--muted)}
+.credentialRow strong{font-size:17px;overflow-wrap:anywhere;user-select:all}
+@media(max-width:680px){.headerActions{gap:5px}.headerActions .secondary{padding:9px 10px;font-size:12px}.credentialRow{align-items:flex-start;flex-direction:column}.credentialRow .secondary{width:100%}}

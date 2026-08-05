@@ -8,7 +8,7 @@ const emptyCustomer = {
   rank: "通常", last_visit: "", spend: "", favorite_drink: "", memo: "", owner_id: ""
 };
 
-const emptyCast = { displayName: "", loginId: "", email: "", password: "" };
+const emptyCast = { displayName: "", loginId: "" };
 
 export default function Home() {
   const [session, setSession] = useState(null);
@@ -23,6 +23,10 @@ export default function Home() {
   const [editing, setEditing] = useState(null);
   const [castModal, setCastModal] = useState(false);
   const [newCast, setNewCast] = useState(emptyCast);
+  const [credentialModal, setCredentialModal] = useState(null);
+  const [passwordModal, setPasswordModal] = useState(false);
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -44,8 +48,12 @@ export default function Home() {
 
   async function loadApp() {
     setBusy(true);
+
     const { data: me, error: meError } = await supabase
-      .from("profiles").select("*").eq("id", session.user.id).single();
+      .from("profiles")
+      .select("*")
+      .eq("id", session.user.id)
+      .single();
 
     if (meError || !me?.is_active) {
       setMessage("このアカウントは利用できません。");
@@ -58,7 +66,7 @@ export default function Home() {
 
     const { data: people } = await supabase
       .from("profiles")
-      .select("id, login_id, display_name, role, is_active")
+      .select("id, login_id, display_name, role, is_active, must_change_password")
       .order("display_name");
 
     setProfiles(people || []);
@@ -82,12 +90,13 @@ export default function Home() {
     setBusy(true);
     setMessage("");
 
-    const email = login.includes("@")
-      ? login.trim()
-      : `${login.trim().toLowerCase()}@night-crm.invalid`;
+    const loginId = login.trim();
+    const email = loginId.includes("@")
+      ? loginId
+      : `${loginId}@night-crm.invalid`;
 
     const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) setMessage(`ログインできません：${error.message}`);
+    if (error) setMessage("ログインIDまたはパスワードが違います。");
     setBusy(false);
   }
 
@@ -170,9 +179,85 @@ export default function Home() {
 
       setCastModal(false);
       setNewCast(emptyCast);
-      setMessage(`${result.cast.display_name}を追加しました。`);
+      setCredentialModal({
+        title: `${result.cast.display_name}を追加しました`,
+        loginId: result.cast.login_id,
+        password: result.temporaryPassword
+      });
       await loadApp();
       setSelectedCastId(result.cast.id);
+    } catch (error) {
+      setMessage(error.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function resetCastPassword(cast) {
+    if (!window.confirm(`${cast.display_name}のパスワードを再発行しますか？`)) return;
+
+    setBusy(true);
+    setMessage("");
+
+    try {
+      const response = await fetch("/api/admin/reset-password", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`
+        },
+        body: JSON.stringify({ userId: cast.id })
+      });
+
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "再発行できませんでした。");
+
+      setCredentialModal({
+        title: `${result.displayName}のパスワードを再発行しました`,
+        loginId: cast.login_id,
+        password: result.temporaryPassword
+      });
+      await loadApp();
+    } catch (error) {
+      setMessage(error.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function changePassword(event) {
+    event.preventDefault();
+    setMessage("");
+
+    if (newPassword.length < 8) {
+      setMessage("パスワードは8文字以上にしてください。");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setMessage("確認用パスワードが一致しません。");
+      return;
+    }
+
+    setBusy(true);
+
+    try {
+      const response = await fetch("/api/account/change-password", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`
+        },
+        body: JSON.stringify({ newPassword })
+      });
+
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "変更できませんでした。");
+
+      setPasswordModal(false);
+      setNewPassword("");
+      setConfirmPassword("");
+      setMessage("パスワードを変更しました。");
+      await loadApp();
     } catch (error) {
       setMessage(error.message);
     } finally {
@@ -226,8 +311,10 @@ export default function Home() {
   async function deleteCustomer() {
     if (!editing?.id || !isAdmin) return;
     if (!window.confirm("この顧客を削除しますか？")) return;
+
     setBusy(true);
     const { error } = await supabase.from("customers").delete().eq("id", editing.id);
+
     if (error) setMessage("削除できませんでした。");
     else {
       setEditing(null);
@@ -243,15 +330,41 @@ export default function Home() {
         <form className="loginCard" onSubmit={signIn}>
           <div className="logo">Night CRM</div>
           <p className="muted">店舗専用 顧客管理</p>
-          <label>メールアドレス</label>
-          <input value={login} onChange={(e) => setLogin(e.target.value)} autoComplete="username" />
+          <label>ログインID</label>
+          <input
+            value={login}
+            onChange={(e) => setLogin(e.target.value.replace(/\D/g, "").slice(0, 3))}
+            inputMode="numeric"
+            autoComplete="username"
+            placeholder="1〜3桁の番号"
+          />
           <label>パスワード</label>
-          <input value={password} onChange={(e) => setPassword(e.target.value)}
-            type="password" autoComplete="current-password" />
+          <input
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            type="password"
+            autoComplete="current-password"
+          />
           <button className="primary full" disabled={busy}>{busy ? "確認中…" : "ログイン"}</button>
           {message && <p className="error">{message}</p>}
         </form>
       </main>
+    );
+  }
+
+  if (profile?.must_change_password) {
+    return (
+      <PasswordChangeScreen
+        displayName={profile.display_name}
+        newPassword={newPassword}
+        confirmPassword={confirmPassword}
+        setNewPassword={setNewPassword}
+        setConfirmPassword={setConfirmPassword}
+        onSubmit={changePassword}
+        busy={busy}
+        message={message}
+        onSignOut={signOut}
+      />
     );
   }
 
@@ -264,7 +377,10 @@ export default function Home() {
           <h1>{isAdmin ? "キャスト別 顧客管理" : "自分の顧客"}</h1>
           <div className="muted small">{profile?.display_name}・{isAdmin ? "管理者" : "キャスト"}</div>
         </div>
-        <button className="secondary" onClick={signOut}>ログアウト</button>
+        <div className="headerActions">
+          <button className="secondary" onClick={() => setPasswordModal(true)}>パスワード変更</button>
+          <button className="secondary" onClick={signOut}>ログアウト</button>
+        </div>
       </header>
 
       {isAdmin && (
@@ -295,15 +411,23 @@ export default function Home() {
 
             <div className="castGrid">
               {activeCasts.map((cast) => (
-                <button className="castFolder" key={cast.id} onClick={() => openCast(cast.id)}>
-                  <div className="folderIcon">▰</div>
-                  <div className="castFolderText">
-                    <strong>{cast.display_name}</strong>
-                    <span>{castCounts[cast.id] || 0}名の顧客</span>
-                    <small>ID：{cast.login_id}</small>
-                  </div>
-                  <div className="chevron">›</div>
-                </button>
+                <article className="castFolder" key={cast.id}>
+                  <button className="folderOpen" onClick={() => openCast(cast.id)}>
+                    <div className="folderIcon">▰</div>
+                    <div className="castFolderText">
+                      <strong>{cast.display_name}</strong>
+                      <span>{castCounts[cast.id] || 0}名の顧客</span>
+                      <small>ログインID：{cast.login_id}</small>
+                      <small className={cast.must_change_password ? "statusPending" : "statusDone"}>
+                        パスワード：{cast.must_change_password ? "初期設定待ち" : "変更済み"}
+                      </small>
+                    </div>
+                    <div className="chevron">›</div>
+                  </button>
+                  <button className="resetButton" onClick={() => resetCastPassword(cast)}>
+                    パスワード再発行
+                  </button>
+                </article>
               ))}
             </div>
 
@@ -340,16 +464,52 @@ export default function Home() {
               <h2>キャスト追加</h2>
               <button type="button" className="secondary" onClick={() => setCastModal(false)}>閉じる</button>
             </div>
-            <Field label="キャスト名"><input value={newCast.displayName}
-              onChange={(e) => setNewCast({ ...newCast, displayName: e.target.value })} /></Field>
-            <Field label="ログインID"><input value={newCast.loginId}
-              onChange={(e) => setNewCast({ ...newCast, loginId: e.target.value })} /></Field>
-            <Field label="実在するメールアドレス"><input type="email" value={newCast.email}
-              onChange={(e) => setNewCast({ ...newCast, email: e.target.value })} /></Field>
-            <Field label="初期パスワード（8文字以上）"><input type="password" value={newCast.password}
-              onChange={(e) => setNewCast({ ...newCast, password: e.target.value })} /></Field>
-            <p className="hint">登録後、そのキャスト専用の顧客フォルダが自動で作成されます。</p>
+            <Field label="キャスト名">
+              <input value={newCast.displayName}
+                onChange={(e) => setNewCast({ ...newCast, displayName: e.target.value })}
+                placeholder="例：あおい" />
+            </Field>
+            <Field label="ログインID（1〜3桁）">
+              <input value={newCast.loginId}
+                onChange={(e) => setNewCast({ ...newCast, loginId: e.target.value.replace(/\D/g, "").slice(0, 3) })}
+                inputMode="numeric"
+                placeholder="例：25" />
+            </Field>
+            <p className="hint">
+              初期パスワードは安全なランダム文字列で自動発行されます。
+              キャスト本人のメールアドレス登録は不要です。
+            </p>
             <button className="primary full" disabled={busy}>{busy ? "追加中…" : "キャストを追加"}</button>
+          </form>
+        </div>
+      )}
+
+      {credentialModal && (
+        <div className="modalBackdrop">
+          <div className="modal credentialModal">
+            <h2>{credentialModal.title}</h2>
+            <p className="warningText">この初期パスワードは、画面を閉じると再表示できません。</p>
+            <CredentialRow label="ログインID" value={credentialModal.loginId} />
+            <CredentialRow label="初期パスワード" value={credentialModal.password} />
+            <button className="primary full" onClick={() => setCredentialModal(null)}>確認して閉じる</button>
+          </div>
+        </div>
+      )}
+
+      {passwordModal && (
+        <div className="modalBackdrop" onMouseDown={() => setPasswordModal(false)}>
+          <form className="modal smallModal" onSubmit={changePassword} onMouseDown={(e) => e.stopPropagation()}>
+            <div className="modalHeader">
+              <h2>パスワード変更</h2>
+              <button type="button" className="secondary" onClick={() => setPasswordModal(false)}>閉じる</button>
+            </div>
+            <PasswordFields
+              newPassword={newPassword}
+              confirmPassword={confirmPassword}
+              setNewPassword={setNewPassword}
+              setConfirmPassword={setConfirmPassword}
+            />
+            <button className="primary full" disabled={busy}>{busy ? "変更中…" : "変更する"}</button>
           </form>
         </div>
       )}
@@ -397,6 +557,51 @@ export default function Home() {
           </form>
         </div>
       )}
+    </div>
+  );
+}
+
+function PasswordChangeScreen(props) {
+  return (
+    <main className="loginPage">
+      <form className="loginCard" onSubmit={props.onSubmit}>
+        <div className="logo">初期パスワード変更</div>
+        <p className="muted">{props.displayName}さん、好きなパスワードに変更してください。</p>
+        <PasswordFields {...props} />
+        <button className="primary full" disabled={props.busy}>{props.busy ? "変更中…" : "変更して開始"}</button>
+        <button type="button" className="secondary full" onClick={props.onSignOut}>ログアウト</button>
+        {props.message && <p className="error">{props.message}</p>}
+      </form>
+    </main>
+  );
+}
+
+function PasswordFields({ newPassword, confirmPassword, setNewPassword, setConfirmPassword }) {
+  return (
+    <>
+      <Field label="新しいパスワード（8文字以上）">
+        <input type="password" value={newPassword}
+          onChange={(e) => setNewPassword(e.target.value)}
+          autoComplete="new-password" />
+      </Field>
+      <Field label="新しいパスワード（確認）">
+        <input type="password" value={confirmPassword}
+          onChange={(e) => setConfirmPassword(e.target.value)}
+          autoComplete="new-password" />
+      </Field>
+    </>
+  );
+}
+
+function CredentialRow({ label, value }) {
+  async function copyValue() {
+    await navigator.clipboard.writeText(value);
+  }
+
+  return (
+    <div className="credentialRow">
+      <div><span>{label}</span><strong>{value}</strong></div>
+      <button className="secondary" onClick={copyValue}>コピー</button>
     </div>
   );
 }
