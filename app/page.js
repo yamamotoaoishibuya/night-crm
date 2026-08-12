@@ -33,6 +33,7 @@ export default function Home() {
   const [editing, setEditing] = useState(null);
   const [visitModal, setVisitModal] = useState(false);
   const [visitDraft, setVisitDraft] = useState({ visited_at: "", amount: "", memo: "", visit_type: "本指名", companions: [] });
+  const [editingVisitId, setEditingVisitId] = useState("");
   const [castModal, setCastModal] = useState(false);
   const [newCast, setNewCast] = useState(emptyCast);
   const [credentialModal, setCredentialModal] = useState(null);
@@ -58,6 +59,7 @@ export default function Home() {
       setHiddenModal(false);
       setCredentialModal(null);
       setVisitModal(false);
+      setEditingVisitId("");
       setPasswordModal(false);
       setEditing(null);
 
@@ -457,7 +459,7 @@ export default function Home() {
   function addCompanionRow() {
     setVisitDraft({
       ...visitDraft,
-      companions: [...(visitDraft.companions || []), { name: "", type: "指名なし" }]
+      companions: [...(visitDraft.companions || []), { name: "", type: "指名なし", cast_name: "" }]
     });
   }
 
@@ -473,7 +475,7 @@ export default function Home() {
     setVisitDraft({ ...visitDraft, companions: next });
   }
 
-  async function addVisit(event) {
+  async function saveVisit(event) {
     event.preventDefault();
 
     if (!selectedCustomer) return;
@@ -484,6 +486,28 @@ export default function Home() {
 
     if (visitDraft.visit_type !== "本指名" && visitDraft.visit_type !== "場内") {
       setMessage("指名種別を「本指名」か「場内」から選んでください。");
+      return;
+    }
+
+    const companions = (visitDraft.companions || [])
+      .map((item) => ({
+        name: String(item.name || "").trim(),
+        type: item.type || "指名なし",
+        cast_name:
+          item.type === "本指名" || item.type === "場内"
+            ? String(item.cast_name || "").trim()
+            : ""
+      }))
+      .filter((item) => item.name);
+
+    const missingCastName = companions.find(
+      (item) =>
+        (item.type === "本指名" || item.type === "場内") &&
+        !item.cast_name
+    );
+
+    if (missingCastName) {
+      setMessage(`${missingCastName.name}さんの指名キャスト名を入力してください。`);
       return;
     }
 
@@ -499,27 +523,58 @@ export default function Home() {
       amount: Number(visitDraft.amount || 0),
       visit_type: visitDraft.visit_type,
       memo: visitDraft.memo || null,
-      companions: (visitDraft.companions || [])
-        .map((item) => ({
-          name: String(item.name || "").trim(),
-          type: item.type || "指名なし"
-        }))
-        .filter((item) => item.name),
+      companions,
       created_by: profile.id
     };
 
-    const { error } = await supabase.from("visit_histories").insert(payload);
+    const result = editingVisitId
+      ? await supabase
+          .from("visit_histories")
+          .update(payload)
+          .eq("id", editingVisitId)
+      : await supabase
+          .from("visit_histories")
+          .insert(payload);
 
-    if (error) {
-      setMessage(`来店履歴を保存できませんでした：${error.message}`);
+    if (result.error) {
+      setMessage(
+        `${editingVisitId ? "来店履歴を更新" : "来店履歴を保存"}できませんでした：${result.error.message}`
+      );
     } else {
       setVisitModal(false);
-      setVisitDraft({ visited_at: "", amount: "", memo: "", visit_type: "本指名", companions: [] });
-      setMessage("来店記録を追加しました。");
+      setEditingVisitId("");
+      setVisitDraft({
+        visited_at: "",
+        amount: "",
+        memo: "",
+        visit_type: "本指名",
+        companions: []
+      });
+      setMessage(editingVisitId ? "来店履歴を更新しました。" : "来店記録を追加しました。");
       await loadVisits();
     }
 
     setBusy(false);
+  }
+
+  function openVisitEditor(visit) {
+    setEditingVisitId(visit.id);
+    setVisitDraft({
+      visited_at: visit.visited_at
+        ? new Date(visit.visited_at).toISOString().slice(0, 10)
+        : new Date().toISOString().slice(0, 10),
+      amount: String(visit.amount ?? ""),
+      memo: visit.memo || "",
+      visit_type: visit.visit_type === "場内" ? "場内" : "本指名",
+      companions: Array.isArray(visit.companions)
+        ? visit.companions.map((item) => ({
+            name: item.name || "",
+            type: item.type || "指名なし",
+            cast_name: item.cast_name || ""
+          }))
+        : []
+    });
+    setVisitModal(true);
   }
 
   async function createCast(event) {
@@ -920,6 +975,7 @@ export default function Home() {
             customer={selectedCustomer}
             visits={customerVisits(selectedCustomer.id)}
             onBack={goBack}
+            onEditVisit={openVisitEditor}
           />
         ) : selectedCustomer ? (
           <CustomerOverview
@@ -929,6 +985,7 @@ export default function Home() {
             castName={castName}
             onBack={goBack}
             onAddVisit={() => {
+              setEditingVisitId("");
               setVisitDraft({
                 visited_at: new Date().toISOString().slice(0, 10),
                 amount: "",
@@ -1163,7 +1220,7 @@ export default function Home() {
               </button>
               <div className="settingsInfo">
                 <div><strong>ログイン中</strong><span>{profile?.display_name}</span></div>
-                <div><strong>アプリ</strong><span>Night CRM v1.6.0</span></div>
+                <div><strong>アプリ</strong><span>Night CRM v1.6.1</span></div>
               </div>
               <button onClick={copyAppUrl}>
                 <div>
@@ -1204,11 +1261,11 @@ export default function Home() {
       )}
 
       {visitModal && selectedCustomer && (
-        <div className="modalBackdrop" onMouseDown={() => setVisitModal(false)}>
-          <form className="modal smallModal" onSubmit={addVisit} onMouseDown={(e) => e.stopPropagation()}>
+        <div className="modalBackdrop" onMouseDown={() => { setVisitModal(false); setEditingVisitId(""); }}>
+          <form className="modal smallModal" onSubmit={saveVisit} onMouseDown={(e) => e.stopPropagation()}>
             <div className="modalHeader">
-              <h2>来店記録を追加</h2>
-              <button type="button" className="secondary" onClick={() => setVisitModal(false)}>
+              <h2>{editingVisitId ? "来店履歴を編集" : "来店記録を追加"}</h2>
+              <button type="button" className="secondary" onClick={() => { setVisitModal(false); setEditingVisitId(""); }}>
                 閉じる
               </button>
             </div>
@@ -1277,6 +1334,13 @@ export default function Home() {
                         <option value="場内">場内</option>
                         <option value="指名なし">指名なし</option>
                       </select>
+                      {(companion.type === "本指名" || companion.type === "場内") && (
+                        <input
+                          value={companion.cast_name || ""}
+                          onChange={(e) => updateCompanionRow(index, "cast_name", e.target.value)}
+                          placeholder="誰を指名？ キャスト名"
+                        />
+                      )}
                       <button type="button" className="removeCompanion"
                         onClick={() => removeCompanionRow(index)}>×</button>
                     </div>
@@ -1286,7 +1350,7 @@ export default function Home() {
             </div>
 
             <button className="primary full" disabled={busy}>
-              {busy ? "保存中…" : "来店記録を保存"}
+              {busy ? "保存中…" : editingVisitId ? "変更を保存" : "来店記録を保存"}
             </button>
           </form>
         </div>
@@ -1690,7 +1754,7 @@ function CustomerOverview({ customer, latest, visits, castName, onBack, onAddVis
   );
 }
 
-function HistoryView({ customer, visits, onBack }) {
+function HistoryView({ customer, visits, onBack, onEditVisit }) {
   return (
     <>
       <button className="backButton" onClick={onBack}>‹ {customer.name}</button>
@@ -1713,14 +1777,24 @@ function HistoryView({ customer, visits, onBack }) {
                   <strong>{formatDate(visit.visited_at)}</strong>
                   <span className="visitTypeBadge">{visit.visit_type || "通常"}</span>
                 </div>
-                <span>¥{Number(visit.amount || 0).toLocaleString()}</span>
+                <div className="historyRight">
+                  <span>¥{Number(visit.amount || 0).toLocaleString()}</span>
+                  <button className="historyEditButton" onClick={() => onEditVisit(visit)}>
+                    編集
+                  </button>
+                </div>
               </div>
               {Array.isArray(visit.companions) && visit.companions.length > 0 && (
                 <div className="historyCompanions">
                   <strong>一緒に来た人</strong>
                   <div>
                     {visit.companions.map((companion, index) => (
-                      <span key={index}>{companion.name}（{companion.type || "指名なし"}）</span>
+                      <span key={index}>
+                        {companion.name}（{companion.type || "指名なし"}
+                        {(companion.type === "本指名" || companion.type === "場内") && companion.cast_name
+                          ? `：${companion.cast_name}`
+                          : ""}）
+                      </span>
                     ))}
                   </div>
                 </div>

@@ -336,3 +336,22 @@ body{padding-bottom:env(safe-area-inset-bottom)}
   .companionRow{grid-template-columns:1fr}
   .removeCompanion{width:100%}
 }
+
+/* v1.6.1 */
+.companionRow{
+  grid-template-columns:minmax(120px,1fr) 130px minmax(150px,1fr) 42px;
+}
+.companionRow>.removeCompanion:last-child{grid-column:auto}
+.historyRight{display:flex;align-items:center;gap:9px}
+.historyEditButton{
+  border:1px solid var(--line);
+  background:#10243c;
+  color:#9fceff;
+  border-radius:9px;
+  padding:6px 10px;
+  font-size:12px;
+}
+@media(max-width:680px){
+  .companionRow{grid-template-columns:1fr}
+  .historyRight{flex-direction:column;align-items:flex-end;gap:5px}
+}

@@ -1,45 +1,56 @@
-# Night CRM v1.6.0
+# Night CRM v1.6.1
 
-今回の追加：
-- 来店履歴に「一緒に来た人」を名前で追加
-- 同伴者ごとに 本指名 / 場内 / 指名なし を保存
-- 累計来店履歴にも名前と種別を表示
-- 基本情報にボトル番号 / ボトル名
-- 既存顧客の基本情報編集から、初回来店日と初回の本指名 / 場内を修正
-- 日付入力を 年 / 月 / 日 の選択式へ統一
-- ボトル番号・ボトル名も全顧客検索対象
-- 戻るスワイプの固定ルールを維持
+## 今回の修正
 
-## Supabase SQL
-今回はDB項目が増えるため、1回だけSQL実行が必要です。
+### 連れの指名キャスト名
+来店履歴で「一緒に来た人」を登録するとき、
+本指名または場内を選んだ場合は
+「誰を指名しているのか」のキャスト名入力欄が表示されます。
 
-```sql
-alter table public.customers
-add column if not exists bottle_number text;
+例：
+- 田中 / 本指名 / nana
+- 佐藤 / 場内 / yuuki
+- 鈴木 / 指名なし
 
-alter table public.customers
-add column if not exists bottle_name text;
+累計来店履歴にも
+`田中（本指名：nana）`
+のように表示されます。
 
-alter table public.visit_histories
-add column if not exists companions jsonb not null default '[]'::jsonb;
+### 累計来店履歴の編集
+累計来店履歴の各カードに「編集」ボタンを追加。
 
-update public.visit_histories
-set companions = '[]'::jsonb
-where companions is null;
-```
+編集可能：
+- 来店日
+- 本指名 / 場内
+- 使用金額
+- 備考
+- 一緒に来た人
+- 連れの指名種別
+- 連れの指名キャスト名
+
+日付はNight CRM固定ルールの
+「年 / 月 / 日」の選択式です。
+
+戻るスワイプの固定ルールも維持しています。
 
 ## 更新手順
-1. ZIPを展開
-2. GitHub `night-crm`
-3. `＋` → `Upload files`
-4. v1.6.0の中身を全部アップロード
-5. `Update to v1.6.0` でCommit
-6. Supabase SQL Editorで上記SQLをRun
-7. Vercel DeploymentsでReady確認
-8. Night CRM再読み込み
+1. `night-crm-v1.6.1.zip` を展開
+2. GitHubの `night-crm` を開く
+3. 右上 `＋` → `Upload files`
+4. `night-crm-v1.6.1` の中身を全部アップロード
+5. Commit message：`Update to v1.6.1`
+6. `Commit changes`
+7. Vercel → `Deployments`
+8. 最新が緑の `Ready` になるまで待つ
+9. Night CRMを再読み込み
 
-Vercel環境変数の追加は不要。
+## Supabase
+今回は新しいDB列を追加していないためSQL実行は不要です。
+v1.6.0のSQL実行済みであればそのまま使えます。
 
-参照元：v1.5.2
-今回：v1.6.0
-戻す場合：v1.5.2
+## Vercel
+環境変数の追加・変更は不要です。
+
+参照元：v1.6.0
+今回：v1.6.1
+戻す場合：v1.6.0
