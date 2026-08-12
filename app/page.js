@@ -478,7 +478,11 @@ export default function Home() {
   async function saveVisit(event) {
     event.preventDefault();
 
-    if (!selectedCustomer) return;
+    if (!selectedCustomer) {
+      setMessage("顧客情報を取得できませんでした。画面を再読み込みしてください。");
+      return;
+    }
+
     if (!visitDraft.visited_at) {
       setMessage("来店日を入力してください。");
       return;
@@ -514,33 +518,51 @@ export default function Home() {
     setBusy(true);
     setMessage("");
 
-    const visitedAt = new Date(`${visitDraft.visited_at}T12:00:00`).toISOString();
+    try {
+      const visitedAt = new Date(`${visitDraft.visited_at}T12:00:00`).toISOString();
 
-    const payload = {
-      customer_id: selectedCustomer.id,
-      owner_id: selectedCustomer.owner_id,
-      visited_at: visitedAt,
-      amount: Number(visitDraft.amount || 0),
-      visit_type: visitDraft.visit_type,
-      memo: visitDraft.memo || null,
-      companions,
-      created_by: profile.id
-    };
+      const payload = {
+        customer_id: selectedCustomer.id,
+        owner_id: selectedCustomer.owner_id,
+        visited_at: visitedAt,
+        amount: Number(visitDraft.amount || 0),
+        visit_type: visitDraft.visit_type,
+        memo: visitDraft.memo || null,
+        companions
+      };
 
-    const result = editingVisitId
-      ? await supabase
-          .from("visit_histories")
-          .update(payload)
-          .eq("id", editingVisitId)
-      : await supabase
-          .from("visit_histories")
-          .insert(payload);
+      // created_by is only necessary on new rows.
+      if (!editingVisitId) {
+        payload.created_by = profile.id;
+      }
 
-    if (result.error) {
-      setMessage(
-        `${editingVisitId ? "来店履歴を更新" : "来店履歴を保存"}できませんでした：${result.error.message}`
-      );
-    } else {
+      const queryPromise = editingVisitId
+        ? supabase
+            .from("visit_histories")
+            .update(payload)
+            .eq("id", editingVisitId)
+            .select("id")
+            .single()
+        : supabase
+            .from("visit_histories")
+            .insert(payload)
+            .select("id")
+            .single();
+
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => {
+          reject(new Error("保存処理がタイムアウトしました。通信状態を確認してもう一度お試しください。"));
+        }, 15000);
+      });
+
+      const result = await Promise.race([queryPromise, timeoutPromise]);
+
+      if (result?.error) {
+        throw result.error;
+      }
+
+      const wasEditing = Boolean(editingVisitId);
+
       setVisitModal(false);
       setEditingVisitId("");
       setVisitDraft({
@@ -550,11 +572,27 @@ export default function Home() {
         visit_type: "本指名",
         companions: []
       });
-      setMessage(editingVisitId ? "来店履歴を更新しました。" : "来店記録を追加しました。");
-      await loadVisits();
-    }
 
-    setBusy(false);
+      await loadVisits();
+
+      setMessage(
+        wasEditing
+          ? "来店履歴を更新しました。"
+          : "来店記録を追加しました。"
+      );
+    } catch (error) {
+      console.error("saveVisit failed", error);
+
+      const detail =
+        error?.message ||
+        error?.details ||
+        error?.hint ||
+        "不明なエラー";
+
+      setMessage(`来店履歴を保存できませんでした：${detail}`);
+    } finally {
+      setBusy(false);
+    }
   }
 
   function openVisitEditor(visit) {
@@ -986,6 +1024,7 @@ export default function Home() {
             onBack={goBack}
             onAddVisit={() => {
               setEditingVisitId("");
+              setMessage("");
               setVisitDraft({
                 visited_at: new Date().toISOString().slice(0, 10),
                 amount: "",
@@ -1220,7 +1259,7 @@ export default function Home() {
               </button>
               <div className="settingsInfo">
                 <div><strong>ログイン中</strong><span>{profile?.display_name}</span></div>
-                <div><strong>アプリ</strong><span>Night CRM v1.6.1</span></div>
+                <div><strong>アプリ</strong><span>Night CRM v1.6.2</span></div>
               </div>
               <button onClick={copyAppUrl}>
                 <div>
@@ -1261,11 +1300,11 @@ export default function Home() {
       )}
 
       {visitModal && selectedCustomer && (
-        <div className="modalBackdrop" onMouseDown={() => { setVisitModal(false); setEditingVisitId(""); }}>
+        <div className="modalBackdrop" onMouseDown={() => { setVisitModal(false); setEditingVisitId(""); setBusy(false); }}>
           <form className="modal smallModal" onSubmit={saveVisit} onMouseDown={(e) => e.stopPropagation()}>
             <div className="modalHeader">
               <h2>{editingVisitId ? "来店履歴を編集" : "来店記録を追加"}</h2>
-              <button type="button" className="secondary" onClick={() => { setVisitModal(false); setEditingVisitId(""); }}>
+              <button type="button" className="secondary" onClick={() => { setVisitModal(false); setEditingVisitId(""); setBusy(false); }}>
                 閉じる
               </button>
             </div>
