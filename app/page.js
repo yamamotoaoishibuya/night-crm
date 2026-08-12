@@ -32,7 +32,7 @@ export default function Home() {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [visitModal, setVisitModal] = useState(false);
-  const [visitDraft, setVisitDraft] = useState({ visited_at: "", amount: "", memo: "", visit_type: "本指名" });
+  const [visitDraft, setVisitDraft] = useState({ visited_at: "", amount: "", memo: "", visit_type: "本指名", companions: [] });
   const [castModal, setCastModal] = useState(false);
   const [newCast, setNewCast] = useState(emptyCast);
   const [credentialModal, setCredentialModal] = useState(null);
@@ -279,6 +279,13 @@ export default function Home() {
     return customerVisits(customerId)[0] || null;
   }
 
+  function firstVisit(customerId) {
+    const list = customerVisits(customerId);
+    return list.length
+      ? [...list].sort((a, b) => new Date(a.visited_at) - new Date(b.visited_at))[0]
+      : null;
+  }
+
   function latestVisitByType(customerId, type) {
     return customerVisits(customerId).find((visit) => visit.visit_type === type) || null;
   }
@@ -351,7 +358,8 @@ export default function Home() {
     const nameMatched = String(customer.name || "").toLowerCase().includes(word);
     const baseText = [
       customer.line_name, customer.phone, customer.job, customer.rank,
-      customer.favorite_drink, customer.memo, castName(customer.owner_id),
+      customer.favorite_drink, customer.memo, customer.bottle_number, customer.bottle_name,
+      castName(customer.owner_id),
       profiles.find((item) => item.id === customer.owner_id)?.login_id
     ].filter(Boolean).join(" ").toLowerCase();
     const normalizedWord = normalizeSearchDate(word);
@@ -446,6 +454,25 @@ export default function Home() {
     });
   }
 
+  function addCompanionRow() {
+    setVisitDraft({
+      ...visitDraft,
+      companions: [...(visitDraft.companions || []), { name: "", type: "指名なし" }]
+    });
+  }
+
+  function updateCompanionRow(index, field, value) {
+    const next = [...(visitDraft.companions || [])];
+    next[index] = { ...next[index], [field]: value };
+    setVisitDraft({ ...visitDraft, companions: next });
+  }
+
+  function removeCompanionRow(index) {
+    const next = [...(visitDraft.companions || [])];
+    next.splice(index, 1);
+    setVisitDraft({ ...visitDraft, companions: next });
+  }
+
   async function addVisit(event) {
     event.preventDefault();
 
@@ -472,6 +499,12 @@ export default function Home() {
       amount: Number(visitDraft.amount || 0),
       visit_type: visitDraft.visit_type,
       memo: visitDraft.memo || null,
+      companions: (visitDraft.companions || [])
+        .map((item) => ({
+          name: String(item.name || "").trim(),
+          type: item.type || "指名なし"
+        }))
+        .filter((item) => item.name),
       created_by: profile.id
     };
 
@@ -481,7 +514,7 @@ export default function Home() {
       setMessage(`来店履歴を保存できませんでした：${error.message}`);
     } else {
       setVisitModal(false);
-      setVisitDraft({ visited_at: "", amount: "", memo: "", visit_type: "本指名" });
+      setVisitDraft({ visited_at: "", amount: "", memo: "", visit_type: "本指名", companions: [] });
       setMessage("来店記録を追加しました。");
       await loadVisits();
     }
@@ -669,6 +702,8 @@ export default function Home() {
       rank: editing.rank,
       favorite_drink: editing.favorite_drink || null,
       memo: editing.memo || null,
+      bottle_number: editing.bottle_number || null,
+      bottle_name: editing.bottle_name || null,
       owner_id: isAdmin ? editing.owner_id : profile.id,
       created_by: isNewCustomer ? profile.id : undefined
     };
@@ -707,12 +742,33 @@ export default function Home() {
 
       if (error) {
         setMessage(`保存できませんでした：${error.message}`);
-      } else {
-        setEditing(null);
-        setMessage("顧客基本情報を更新しました。");
-        await loadCustomers();
+        setBusy(false);
+        return;
       }
 
+      const earliest = firstVisit(editing.id);
+      if (earliest && editing.initial_visit_type) {
+        const firstPatch = { visit_type: editing.initial_visit_type };
+        if (editing.initial_visit_date) {
+          firstPatch.visited_at =
+            new Date(`${editing.initial_visit_date}T12:00:00`).toISOString();
+        }
+
+        const { error: firstError } = await supabase
+          .from("visit_histories")
+          .update(firstPatch)
+          .eq("id", earliest.id);
+
+        if (firstError) {
+          setMessage(`基本情報は保存しましたが、初回来店情報を更新できませんでした：${firstError.message}`);
+          setBusy(false);
+          return;
+        }
+      }
+
+      setEditing(null);
+      setMessage("顧客基本情報を更新しました。");
+      await Promise.all([loadCustomers(), loadVisits()]);
       setBusy(false);
       return;
     }
@@ -736,6 +792,7 @@ export default function Home() {
       amount: Number(editing.initial_visit_amount || 0),
       visit_type: editing.initial_visit_type,
       memo: editing.initial_visit_memo || null,
+      companions: [],
       created_by: profile.id
     };
 
@@ -876,7 +933,8 @@ export default function Home() {
                 visited_at: new Date().toISOString().slice(0, 10),
                 amount: "",
                 memo: "",
-                visit_type: "本指名"
+                visit_type: "本指名",
+                companions: []
               });
               setVisitModal(true);
             }}
@@ -888,7 +946,16 @@ export default function Home() {
                 customerId: selectedCustomer.id
               });
             }}
-            onEdit={() => setEditing({ ...selectedCustomer })}
+            onEdit={() => {
+              const earliest = firstVisit(selectedCustomer.id);
+              setEditing({
+                ...selectedCustomer,
+                initial_visit_date: earliest?.visited_at
+                  ? new Date(earliest.visited_at).toISOString().slice(0, 10)
+                  : "",
+                initial_visit_type: earliest?.visit_type || "本指名"
+              });
+            }}
           />
         ) : selectedCastId ? (
           <>
@@ -1096,7 +1163,7 @@ export default function Home() {
               </button>
               <div className="settingsInfo">
                 <div><strong>ログイン中</strong><span>{profile?.display_name}</span></div>
-                <div><strong>アプリ</strong><span>Night CRM v1.5.2</span></div>
+                <div><strong>アプリ</strong><span>Night CRM v1.6.0</span></div>
               </div>
               <button onClick={copyAppUrl}>
                 <div>
@@ -1162,10 +1229,9 @@ export default function Home() {
             </Field>
 
             <Field label="来店日">
-              <input
-                type="date"
+              <DateScroller
                 value={visitDraft.visited_at}
-                onChange={(e) => setVisitDraft({ ...visitDraft, visited_at: e.target.value })}
+                onChange={(value) => setVisitDraft({ ...visitDraft, visited_at: value })}
               />
             </Field>
 
@@ -1187,6 +1253,37 @@ export default function Home() {
                 placeholder="例：同僚2名と来店。次回は月末予定。"
               />
             </Field>
+            <div className="companionSection">
+              <div className="companionHeader">
+                <div>
+                  <strong>一緒に来た人</strong>
+                  <span>名前と、本指名・場内・指名なしを登録</span>
+                </div>
+                <button type="button" className="secondary" onClick={addCompanionRow}>＋ 連れを追加</button>
+              </div>
+
+              {(visitDraft.companions || []).length === 0 ? (
+                <div className="companionEmpty">連れの登録なし</div>
+              ) : (
+                <div className="companionList">
+                  {(visitDraft.companions || []).map((companion, index) => (
+                    <div className="companionRow" key={index}>
+                      <input value={companion.name}
+                        onChange={(e) => updateCompanionRow(index, "name", e.target.value)}
+                        placeholder="名前" />
+                      <select value={companion.type}
+                        onChange={(e) => updateCompanionRow(index, "type", e.target.value)}>
+                        <option value="本指名">本指名</option>
+                        <option value="場内">場内</option>
+                        <option value="指名なし">指名なし</option>
+                      </select>
+                      <button type="button" className="removeCompanion"
+                        onClick={() => removeCompanionRow(index)}>×</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
 
             <button className="primary full" disabled={busy}>
               {busy ? "保存中…" : "来店記録を保存"}
@@ -1349,8 +1446,8 @@ export default function Home() {
                 onChange={(e) => setEditing({ ...editing, phone: e.target.value })} /></Field>
               <Field label="職業・勤務先"><input value={editing.job || ""}
                 onChange={(e) => setEditing({ ...editing, job: e.target.value })} /></Field>
-              <Field label="誕生日"><input type="date" value={editing.birthday || ""}
-                onChange={(e) => setEditing({ ...editing, birthday: e.target.value })} /></Field>
+              <Field label="誕生日"><DateScroller value={editing.birthday || ""}
+                onChange={(value) => setEditing({ ...editing, birthday: value })} allowEmpty /></Field>
               <Field label="顧客ランク"><select value={editing.rank}
                 onChange={(e) => setEditing({ ...editing, rank: e.target.value })}>
                 <option>通常</option><option>見込み</option><option>VIP</option><option>休眠</option><option>注意</option>
@@ -1361,28 +1458,34 @@ export default function Home() {
               </select></Field>}
               <Field label="好きなお酒"><input value={editing.favorite_drink || ""}
                 onChange={(e) => setEditing({ ...editing, favorite_drink: e.target.value })} /></Field>
+              <Field label="ボトル番号"><input value={editing.bottle_number || ""}
+                onChange={(e) => setEditing({ ...editing, bottle_number: e.target.value })}
+                placeholder="例：B-123" /></Field>
+              <Field label="ボトル名"><input value={editing.bottle_name || ""}
+                onChange={(e) => setEditing({ ...editing, bottle_name: e.target.value })}
+                placeholder="例：響" /></Field>
               <div className="wide"><Field label="メモ・会話内容・注意事項"><textarea
                 value={editing.memo || ""} onChange={(e) => setEditing({ ...editing, memo: e.target.value })} />
               </Field></div>
 
 
-              {!editing.id && (
-                <div className="wide initialVisitSection">
+              <div className="wide initialVisitSection">
                   <div className="subFormTitle">
                     <div>
-                      <strong>初回来店情報</strong>
-                      <span>顧客フォルダ作成と同時に1件目の来店履歴として保存されます</span>
+                      <strong>{editing.id ? "初回来店情報を修正" : "初回来店情報"}</strong>
+                      <span>{editing.id
+                        ? "最初の来店履歴の日付と本指名・場内を修正できます"
+                        : "顧客フォルダ作成と同時に1件目の来店履歴として保存されます"}</span>
                     </div>
                   </div>
 
                   <div className="formGrid nestedGrid">
                     <Field label="初回来店日">
-                      <input
-                        type="date"
+                      <DateScroller
                         value={editing.initial_visit_date || ""}
-                        onChange={(e) => setEditing({
+                        onChange={(value) => setEditing({
                           ...editing,
-                          initial_visit_date: e.target.value
+                          initial_visit_date: value
                         })}
                       />
                     </Field>
@@ -1400,6 +1503,8 @@ export default function Home() {
                       </select>
                     </Field>
 
+                    {!editing.id && (
+                      <>
                     <Field label="その日の使用金額">
                       <input
                         type="number"
@@ -1426,9 +1531,10 @@ export default function Home() {
                         />
                       </Field>
                     </div>
+                      </>
+                    )}
                   </div>
                 </div>
-              )}
             </div>
             <div className="modalActions">
               {editing.id && isAdmin ? <button type="button" className="danger" onClick={deleteCustomer}>削除</button> : <span />}
@@ -1575,6 +1681,8 @@ function CustomerOverview({ customer, latest, visits, castName, onBack, onAddVis
         <InfoRow label="職業・勤務先" value={customer.job || "未登録"} />
         <InfoRow label="誕生日" value={customer.birthday || "未登録"} />
         <InfoRow label="好きなお酒" value={customer.favorite_drink || "未登録"} />
+        <InfoRow label="ボトル番号" value={customer.bottle_number || "未登録"} />
+        <InfoRow label="ボトル名" value={customer.bottle_name || "未登録"} />
         <InfoRow label="ランク" value={customer.rank || "通常"} />
         <InfoRow label="基本メモ" value={customer.memo || "未登録"} />
       </section>
@@ -1607,6 +1715,16 @@ function HistoryView({ customer, visits, onBack }) {
                 </div>
                 <span>¥{Number(visit.amount || 0).toLocaleString()}</span>
               </div>
+              {Array.isArray(visit.companions) && visit.companions.length > 0 && (
+                <div className="historyCompanions">
+                  <strong>一緒に来た人</strong>
+                  <div>
+                    {visit.companions.map((companion, index) => (
+                      <span key={index}>{companion.name}（{companion.type || "指名なし"}）</span>
+                    ))}
+                  </div>
+                </div>
+              )}
               <p>{visit.memo || "備考なし"}</p>
             </article>
           ))}
@@ -1621,6 +1739,44 @@ function InfoRow({ label, value }) {
     <div className="infoRow">
       <span>{label}</span>
       <strong>{value}</strong>
+    </div>
+  );
+}
+
+function DateScroller({ value, onChange, allowEmpty = false }) {
+  const now = new Date();
+  const parsed = value ? new Date(`${value}T12:00:00`) : null;
+  const valid = parsed && !Number.isNaN(parsed.getTime());
+  const year = valid ? parsed.getFullYear() : now.getFullYear();
+  const month = valid ? parsed.getMonth() + 1 : now.getMonth() + 1;
+  const day = valid ? parsed.getDate() : now.getDate();
+
+  const years = Array.from({ length: now.getFullYear() - 1919 + 6 }, (_, i) => now.getFullYear() + 5 - i);
+  const maxDay = new Date(year, month, 0).getDate();
+  const safeDay = Math.min(day, maxDay);
+
+  function emit(y, m, d) {
+    const last = new Date(y, m, 0).getDate();
+    const dd = Math.min(d, last);
+    onChange(`${y}-${String(m).padStart(2, "0")}-${String(dd).padStart(2, "0")}`);
+  }
+
+  if (allowEmpty && !value) {
+    return <button type="button" className="secondary full" onClick={() => emit(now.getFullYear(), now.getMonth() + 1, now.getDate())}>日付を設定</button>;
+  }
+
+  return (
+    <div className="dateScroller">
+      <label><span>年</span><select value={year} onChange={(e) => emit(Number(e.target.value), month, safeDay)}>
+        {years.map((y) => <option key={y} value={y}>{y}年</option>)}
+      </select></label>
+      <label><span>月</span><select value={month} onChange={(e) => emit(year, Number(e.target.value), safeDay)}>
+        {Array.from({length:12},(_,i)=>i+1).map((m)=><option key={m} value={m}>{m}月</option>)}
+      </select></label>
+      <label><span>日</span><select value={safeDay} onChange={(e) => emit(year, month, Number(e.target.value))}>
+        {Array.from({length:maxDay},(_,i)=>i+1).map((d)=><option key={d} value={d}>{d}日</option>)}
+      </select></label>
+      {allowEmpty && <button type="button" className="dateClear" onClick={() => onChange("")}>クリア</button>}
     </div>
   );
 }
