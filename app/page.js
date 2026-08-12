@@ -134,6 +134,9 @@ export default function Home() {
 
     setProfiles(sortedPeople);
     if (me.role === "cast") setSelectedCastId(me.id);
+
+    replaceBaseHistory(me);
+
     await Promise.all([loadCustomers(), loadVisits()]);
     setBusy(false);
   }
@@ -142,7 +145,7 @@ export default function Home() {
     const { data, error } = await supabase
       .from("customers")
       .select("*")
-      .order("last_visit", { ascending: false, nullsFirst: false });
+      .order("created_at", { ascending: true });
 
     if (error) setMessage("顧客データを取得できませんでした。");
     else setCustomers(data || []);
@@ -287,13 +290,16 @@ export default function Home() {
   const globalResults = useMemo(() => {
     const word = globalQuery.trim().toLowerCase();
     if (!word) return [];
-    return customers.filter((customer) =>
+
+    const filtered = customers.filter((customer) =>
       [customer.name, customer.line_name, customer.phone, customer.job, customer.rank,
        customer.favorite_drink, customer.memo, castName(customer.owner_id),
        profiles.find((item) => item.id === customer.owner_id)?.login_id]
         .filter(Boolean).join(" ").toLowerCase().includes(word)
     );
-  }, [customers, globalQuery, profiles]);
+
+    return sortCustomers(filtered);
+  }, [customers, globalQuery, profiles, visits, customerSort]);
 
   const selectedCast = profiles.find((item) => item.id === selectedCastId);
   const selectedCustomer = customers.find((item) => item.id === selectedCustomerId);
@@ -313,14 +319,18 @@ export default function Home() {
 
   const selectedCustomers = useMemo(() => {
     const word = castQuery.trim().toLowerCase();
-    return customers.filter((customer) => {
+
+    const filtered = customers.filter((customer) => {
       if (customer.owner_id !== selectedCastId) return false;
       if (!word) return true;
+
       return [customer.name, customer.line_name, customer.phone, customer.job,
         customer.rank, customer.favorite_drink, customer.memo]
         .filter(Boolean).join(" ").toLowerCase().includes(word);
     });
-  }, [customers, selectedCastId, castQuery]);
+
+    return sortCustomers(filtered);
+  }, [customers, selectedCastId, castQuery, visits, customerSort]);
 
   function openCast(id) {
     setSelectedCastId(id);
@@ -342,11 +352,6 @@ export default function Home() {
 
   function goBack() {
     window.history.back();
-  }
-
-
-    touchStartX.current = null;
-    touchStartY.current = null;
   }
 
   function openNewCustomer() {
@@ -733,6 +738,15 @@ export default function Home() {
               <div><h2>全体検索結果</h2><span className="muted">{globalResults.length}件</span></div>
               <button className="secondary" onClick={() => setGlobalQuery("")}>閉じる</button>
             </div>
+            <div className="customerSortBar">
+              <span>並び順</span>
+              <select value={customerSort} onChange={(e) => setCustomerSort(e.target.value)}>
+                <option value="created">登録順</option>
+                <option value="latest_visit">最終来店日順</option>
+                <option value="latest_nomination">最終本指名日順</option>
+                <option value="latest_inhouse">最終場内日順</option>
+              </select>
+            </div>
             <CustomerFolderList
               customers={globalResults}
               latestVisit={latestVisit}
@@ -805,6 +819,16 @@ export default function Home() {
             <div className="castSearch">
               <input value={castQuery} onChange={(e) => setCastQuery(e.target.value)}
                 placeholder="このキャストの顧客を検索" />
+            </div>
+
+            <div className="customerSortBar">
+              <span>並び順</span>
+              <select value={customerSort} onChange={(e) => setCustomerSort(e.target.value)}>
+                <option value="created">登録順</option>
+                <option value="latest_visit">最終来店日順</option>
+                <option value="latest_nomination">最終本指名日順</option>
+                <option value="latest_inhouse">最終場内日順</option>
+              </select>
             </div>
 
             <CustomerFolderList
