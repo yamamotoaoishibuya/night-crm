@@ -332,51 +332,147 @@ export default function Home() {
   }
 
   function normalizeSearchDate(value) {
-    return String(value || "").trim().replace(/[年月.\-]/g, "/").replace(/日/g, "");
+    return String(value || "")
+      .trim()
+      .toLowerCase()
+      .replace(/[年月.\-]/g, "/")
+      .replace(/日/g, "")
+      .replace(/\s+/g, " ");
   }
 
-  function visitSearchText(customerId) {
-    return customerVisits(customerId).map((visit) => {
-      if (!visit.visited_at) return "";
-      const date = new Date(visit.visited_at);
-      if (Number.isNaN(date.getTime())) return String(visit.visited_at);
-      const y = date.getFullYear();
-      const m = date.getMonth() + 1;
-      const d = date.getDate();
-      return [
-        `${y}/${m}/${d}`,
-        `${y}/${String(m).padStart(2, "0")}/${String(d).padStart(2, "0")}`,
-        `${m}/${d}`,
-        `${String(m).padStart(2, "0")}/${String(d).padStart(2, "0")}`,
-        `${y}年${m}月${d}日`,
-        `${m}月${d}日`
-      ].join(" ");
-    }).join(" ");
+  function formatSearchDate(value) {
+    if (!value) return "";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return String(value);
+    return `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()}`;
   }
 
-  function globalMatchInfo(customer, rawWord) {
-    const word = rawWord.trim().toLowerCase();
-    if (!word) return { matched: false, nameMatched: false };
-    const nameMatched = String(customer.name || "").toLowerCase().includes(word);
-    const baseText = [
-      customer.line_name, customer.phone, customer.job, customer.rank,
-      customer.favorite_drink, customer.memo, customer.bottle_number, customer.bottle_name,
-      castName(customer.owner_id),
-      profiles.find((item) => item.id === customer.owner_id)?.login_id
-    ].filter(Boolean).join(" ").toLowerCase();
+  function customerSearchMeta(customer, rawWord) {
+    const word = String(rawWord || "").trim().toLowerCase();
     const normalizedWord = normalizeSearchDate(word);
-    const visitsText = normalizeSearchDate(visitSearchText(customer.id).toLowerCase());
+    if (!word) return { matched: false, nameMatched: false, reasons: [] };
+
+    const reasons = [];
+    const customerName = String(customer.name || "");
+    const nameMatched = customerName.toLowerCase().includes(word);
+
+    function addReason(label, value, extra = {}) {
+      if (!value) return;
+      reasons.push({
+        label,
+        value: String(value),
+        ...extra
+      });
+    }
+
+    if (nameMatched) addReason("顧客名", customerName);
+
+    const basicFields = [
+      ["LINE名", customer.line_name],
+      ["電話番号", customer.phone],
+      ["職業・勤務先", customer.job],
+      ["ランク", customer.rank],
+      ["好きなお酒", customer.favorite_drink],
+      ["基本メモ", customer.memo],
+      ["ボトル番号", customer.bottle_number],
+      ["ボトル名", customer.bottle_name],
+      ["担当キャスト", castName(customer.owner_id)],
+      ["担当ログインID", profiles.find((item) => item.id === customer.owner_id)?.login_id]
+    ];
+
+    for (const [label, value] of basicFields) {
+      if (String(value || "").toLowerCase().includes(word)) {
+        addReason(label, value);
+      }
+    }
+
+    const relatedVisits = customerVisits(customer.id);
+
+    for (const visit of relatedVisits) {
+      const visitDateText = formatSearchDate(visit.visited_at);
+      const visitDateNormalized = normalizeSearchDate(visitDateText);
+
+      if (normalizedWord && visitDateNormalized.includes(normalizedWord)) {
+        addReason("来店日", visitDateText, {
+          visitId: visit.id,
+          visitDate: visit.visited_at
+        });
+      }
+
+      if (String(visit.visit_type || "").toLowerCase().includes(word)) {
+        addReason("来店種別", visit.visit_type, {
+          visitId: visit.id,
+          visitDate: visit.visited_at
+        });
+      }
+
+      if (String(visit.memo || "").toLowerCase().includes(word)) {
+        addReason("来店備考", visit.memo, {
+          visitId: visit.id,
+          visitDate: visit.visited_at
+        });
+      }
+
+      if (String(visit.amount ?? "").includes(word)) {
+        addReason("使用金額", `¥${Number(visit.amount || 0).toLocaleString()}`, {
+          visitId: visit.id,
+          visitDate: visit.visited_at
+        });
+      }
+
+      const companions = Array.isArray(visit.companions) ? visit.companions : [];
+
+      for (const companion of companions) {
+        if (String(companion.name || "").toLowerCase().includes(word)) {
+          addReason("連れの名前", companion.name, {
+            visitId: visit.id,
+            visitDate: visit.visited_at,
+            companionType: companion.type || "指名なし",
+            companionCast: companion.cast_name || ""
+          });
+        }
+
+        if (String(companion.type || "").toLowerCase().includes(word)) {
+          addReason("連れの指名種別", `${companion.name || "連れ"}：${companion.type}`, {
+            visitId: visit.id,
+            visitDate: visit.visited_at,
+            companionCast: companion.cast_name || ""
+          });
+        }
+
+        if (String(companion.cast_name || "").toLowerCase().includes(word)) {
+          addReason("連れの指名キャスト", `${companion.name || "連れ"} → ${companion.cast_name}`, {
+            visitId: visit.id,
+            visitDate: visit.visited_at,
+            companionType: companion.type || ""
+          });
+        }
+      }
+    }
+
     return {
-      matched: nameMatched || baseText.includes(word) ||
-        (normalizedWord && visitsText.includes(normalizedWord)),
-      nameMatched
+      matched: reasons.length > 0,
+      nameMatched,
+      reasons
     };
   }
 
   const globalResults = useMemo(() => {
-    const word = globalQuery.trim().toLowerCase();
+    const word = globalQuery.trim();
     if (!word) return [];
-    return sortCustomers(customers.filter((customer) => globalMatchInfo(customer, word).matched));
+
+    const matches = customers
+      .map((customer) => ({
+        customer,
+        searchMeta: customerSearchMeta(customer, word)
+      }))
+      .filter((item) => item.searchMeta.matched);
+
+    const sortedCustomers = sortCustomers(matches.map((item) => item.customer));
+
+    return sortedCustomers.map((customer) =>
+      matches.find((item) => item.customer.id === customer.id)
+    );
   }, [customers, globalQuery, profiles, visits, customerSort]);
 
   const selectedCast = profiles.find((item) => item.id === selectedCastId);
@@ -992,7 +1088,7 @@ export default function Home() {
                   ? adminTab === "home"
                     ? "ホーム"
                     : adminTab === "search"
-                      ? "全顧客検索"
+                      ? "全データ検索"
                       : adminTab === "casts"
                         ? "キャスト"
                         : "設定"
@@ -1098,53 +1194,67 @@ export default function Home() {
           <>
             <section className="homeHero">
               <div className="eyebrow">管理者ホーム</div>
-              <h2>今日もここから</h2>
-              <p>よく使う操作だけを大きくまとめています。</p>
+              <h2>保存されているデータを検索</h2>
+              <p>顧客・来店履歴・連れ・ボトル・備考まで、ここからまとめて探せます。</p>
             </section>
 
-            <div className="quickGrid">
-              <button className="quickCard" onClick={() => navigateAdminTab("search")}>
-                <span className="quickIcon">⌕</span>
-                <strong>全顧客を探す</strong>
-                <small>名前・担当・来店日などから検索</small>
-              </button>
-              <button className="quickCard" onClick={() => navigateAdminTab("casts")}>
-                <span className="quickIcon">♙</span>
-                <strong>キャストから探す</strong>
-                <small>キャスト → 顧客フォルダ</small>
-              </button>
+            <div className="homeUniversalSearch">
+              <div className="searchFieldWithIcon largeSearch">
+                <span>⌕</span>
+                <input
+                  value={globalQuery}
+                  onChange={(e) => setGlobalQuery(e.target.value)}
+                  placeholder="例：深澤 / 8/12 / ボトル番号 / nana"
+                />
+                {globalQuery && (
+                  <button className="clearSearch" onClick={() => setGlobalQuery("")}>×</button>
+                )}
+              </div>
             </div>
 
-            <section className="dashboardStats singleStat">
-              <div><span>表示中キャスト</span><strong>{activeCasts.length}</strong></div>
-            </section>
+            {globalQuery.trim() ? (
+              <>
+                <div className="resultCount">{globalResults.length}件見つかりました</div>
+                <UniversalSearchResults
+                  items={globalResults}
+                  onOpenCustomer={(customer) => openCustomer(customer.id)}
+                  castName={castName}
+                />
+              </>
+            ) : (
+              <>
+                <section className="dashboardStats singleStat">
+                  <div><span>表示中キャスト</span><strong>{activeCasts.length}</strong></div>
+                </section>
 
-            <section className="homeSection">
-              <div className="sectionHeading">
-                <div>
-                  <div className="eyebrow">キャスト</div>
-                  <h3>すぐ開く</h3>
-                </div>
-                <button className="textButton" onClick={() => navigateAdminTab("casts")}>すべて見る ›</button>
-              </div>
-              <div className="miniCastRow">
-                {activeCasts.map((cast) => (
-                  <button key={cast.id} className="miniCast" onClick={() => openCast(cast.id)}>
-                    <span>No.{cast.login_id}</span>
-                    <strong>{cast.display_name}</strong>
-                    <small>{castCounts[cast.id] || 0}名</small>
-                  </button>
-                ))}
-              </div>
-            </section>
+                <section className="homeSection">
+                  <div className="sectionHeading">
+                    <div>
+                      <div className="eyebrow">キャスト</div>
+                      <h3>キャスト一覧</h3>
+                    </div>
+                    <button className="textButton" onClick={() => navigateAdminTab("casts")}>管理画面へ ›</button>
+                  </div>
+                  <div className="miniCastRow">
+                    {activeCasts.map((cast) => (
+                      <button key={cast.id} className="miniCast" onClick={() => openCast(cast.id)}>
+                        <span>No.{cast.login_id}</span>
+                        <strong>{cast.display_name}</strong>
+                        <small>{castCounts[cast.id] || 0}名</small>
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              </>
+            )}
           </>
         ) : isAdmin && adminTab === "search" ? (
           <>
             <div className="pageHero compactHero">
               <div>
-                <div className="eyebrow">全顧客</div>
-                <h2>検索</h2>
-                <p>顧客名・LINE・電話・メモ・担当キャスト・ログインID・来店日を横断検索。</p>
+                <div className="eyebrow">全データ検索</div>
+                <h2>横断検索</h2>
+                <p>顧客・来店履歴・連れ・ボトル・備考・指名キャストまで検索します。</p>
               </div>
             </div>
 
@@ -1155,14 +1265,14 @@ export default function Home() {
                   autoFocus
                   value={globalQuery}
                   onChange={(e) => setGlobalQuery(e.target.value)}
-                  placeholder="例：山田 / yuuki / 8/12"
+                  placeholder="例：深澤 / 2026/8/13 / 場内 / nana"
                 />
                 {globalQuery && (
                   <button className="clearSearch" onClick={() => setGlobalQuery("")}>×</button>
                 )}
               </div>
               <label className="sortControl">
-                <span>並び順</span>
+                <span>顧客の並び順</span>
                 <select value={customerSort} onChange={(e) => setCustomerSort(e.target.value)}>
                   <option value="created">登録順</option>
                   <option value="latest_visit">最終来店日順</option>
@@ -1175,22 +1285,16 @@ export default function Home() {
             {!globalQuery.trim() ? (
               <div className="searchEmptyState">
                 <span>⌕</span>
-                <strong>検索ワードを入力</strong>
-                <small>来店日は「8/12」「2026/8/12」でも検索できます。</small>
+                <strong>保存済みデータを横断検索</strong>
+                <small>顧客名、連れの名前、来店日、備考、ボトル番号など何でも検索できます。</small>
               </div>
             ) : (
               <>
                 <div className="resultCount">{globalResults.length}件見つかりました</div>
-                <CustomerFolderList
-                  customers={globalResults}
-                  latestVisit={latestVisit}
-                  latestVisitByType={latestVisitByType}
+                <UniversalSearchResults
+                  items={globalResults}
+                  onOpenCustomer={(customer) => openCustomer(customer.id)}
                   castName={castName}
-                  showCast
-                  showCastOnlyWhenNameMiss
-                  query={globalQuery}
-                  matchInfo={globalMatchInfo}
-                  onOpen={(customer) => openCustomer(customer.id)}
                 />
               </>
             )}
@@ -1259,7 +1363,7 @@ export default function Home() {
               </button>
               <div className="settingsInfo">
                 <div><strong>ログイン中</strong><span>{profile?.display_name}</span></div>
-                <div><strong>アプリ</strong><span>Night CRM v1.6.2</span></div>
+                <div><strong>アプリ</strong><span>Night CRM v1.6.3</span></div>
               </div>
               <button onClick={copyAppUrl}>
                 <div>
@@ -1288,7 +1392,7 @@ export default function Home() {
             <span>⌂</span><small>ホーム</small>
           </button>
           <button className={adminTab === "search" ? "active" : ""} onClick={() => navigateAdminTab("search")}>
-            <span>⌕</span><small>全顧客</small>
+            <span>⌕</span><small>検索</small>
           </button>
           <button className={adminTab === "casts" ? "active" : ""} onClick={() => navigateAdminTab("casts")}>
             <span>♙</span><small>キャスト</small>
@@ -1691,6 +1795,62 @@ function CredentialRow({ label, value }) {
     <div className="credentialRow">
       <div><span>{label}</span><strong>{value}</strong></div>
       <button className="secondary" onClick={copyValue}>コピー</button>
+    </div>
+  );
+}
+
+function UniversalSearchResults({ items, onOpenCustomer, castName }) {
+  if (items.length === 0) {
+    return <div className="empty">該当するデータがありません。</div>;
+  }
+
+  return (
+    <div className="universalResults">
+      {items.map(({ customer, searchMeta }) => {
+        const primaryReasons = (searchMeta.reasons || []).slice(0, 4);
+
+        return (
+          <button
+            className="universalResultCard"
+            key={customer.id}
+            onClick={() => onOpenCustomer(customer)}
+          >
+            <div className="resultCustomerTop">
+              <div>
+                <strong>{customer.name}</strong>
+                <span>担当：{castName(customer.owner_id)}</span>
+              </div>
+              <div className="chevron">›</div>
+            </div>
+
+            <div className="hitReasonList">
+              {primaryReasons.map((reason, index) => (
+                <div className="hitReason" key={`${reason.label}-${index}`}>
+                  <span className="hitLabel">{reason.label}</span>
+                  <div className="hitValueWrap">
+                    <strong>{reason.value}</strong>
+                    {reason.visitDate && (
+                      <small>来店日：{formatDate(reason.visitDate)}</small>
+                    )}
+                    {reason.companionType && (
+                      <small>
+                        {reason.companionType}
+                        {reason.companionCast ? `：${reason.companionCast}` : ""}
+                      </small>
+                    )}
+                  </div>
+                </div>
+              ))}
+
+              {(searchMeta.reasons || []).length > 4 && (
+                <small className="moreHits">
+                  他 {(searchMeta.reasons || []).length - 4} 件ヒット
+                </small>
+              )}
+            </div>
+          </button>
+        );
+      })}
     </div>
   );
 }
