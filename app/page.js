@@ -5,7 +5,11 @@ import { supabase } from "../lib/supabase";
 
 const emptyCustomer = {
   id: "", name: "", line_name: "", phone: "", job: "", birthday: "",
-  rank: "通常", last_visit: "", spend: "", favorite_drink: "", memo: "", owner_id: ""
+  rank: "通常", last_visit: "", spend: "", favorite_drink: "", memo: "", owner_id: "",
+  initial_visit_date: "",
+  initial_visit_type: "本指名",
+  initial_visit_amount: "",
+  initial_visit_memo: ""
 };
 
 const emptyCast = { displayName: "", loginId: "" };
@@ -49,6 +53,14 @@ export default function Home() {
     function handlePopState(event) {
       const state = event.state || {};
 
+      setCastActionTarget(null);
+      setCastModal(false);
+      setHiddenModal(false);
+      setCredentialModal(null);
+      setVisitModal(false);
+      setPasswordModal(false);
+      setEditing(null);
+
       if (state.view === "history") {
         setSelectedCastId(state.castId || "");
         setSelectedCustomerId(state.customerId || "");
@@ -70,10 +82,19 @@ export default function Home() {
         return;
       }
 
+      if (state.view === "admin-tab") {
+        setAdminTab(state.tab || "home");
+        setSelectedCastId("");
+        setSelectedCustomerId("");
+        setHistoryOpen(false);
+        return;
+      }
+
       setSelectedCustomerId("");
       setHistoryOpen(false);
 
       if (profile?.role === "admin") {
+        setAdminTab("home");
         setSelectedCastId("");
       } else if (profile?.id) {
         setSelectedCastId(profile.id);
@@ -137,6 +158,7 @@ export default function Home() {
     setProfiles(sortedPeople);
     if (me.role === "cast") setSelectedCastId(me.id);
 
+    if (me.role === "admin") setAdminTab("home");
     replaceBaseHistory(me);
 
     await Promise.all([loadCustomers(), loadVisits()]);
@@ -230,9 +252,6 @@ export default function Home() {
     return counts;
   }, [customers]);
 
-  const totalVisits = visits.length;
-  const nominationVisits = visits.filter((visit) => visit.visit_type === "本指名").length;
-  const inhouseVisits = visits.filter((visit) => visit.visit_type === "場内").length;
 
   function castName(id) {
     const item = profiles.find((profileItem) => profileItem.id === id);
@@ -346,7 +365,7 @@ export default function Home() {
   function replaceBaseHistory(me) {
     const state =
       me.role === "admin"
-        ? { view: "casts" }
+        ? { view: "admin-tab", tab: "home" }
         : { view: "cast", castId: me.id };
 
     window.history.replaceState(state, "", window.location.pathname);
@@ -354,6 +373,16 @@ export default function Home() {
 
   function pushHistory(state) {
     window.history.pushState(state, "", window.location.pathname);
+  }
+
+  function navigateAdminTab(tab) {
+    if (!isAdmin) return;
+    setAdminTab(tab);
+    setSelectedCastId("");
+    setSelectedCustomerId("");
+    setHistoryOpen(false);
+    setGlobalQuery("");
+    pushHistory({ view: "admin-tab", tab });
   }
 
   const selectedCustomers = useMemo(() => {
@@ -399,7 +428,12 @@ export default function Home() {
       setMessage("先にキャストを選択してください。");
       return;
     }
-    setEditing({ ...emptyCustomer, owner_id: ownerId });
+    setEditing({
+      ...emptyCustomer,
+      owner_id: ownerId,
+      initial_visit_date: new Date().toISOString().slice(0, 10),
+      initial_visit_type: "本指名"
+    });
   }
 
   async function addVisit(event) {
@@ -609,6 +643,8 @@ export default function Home() {
     setBusy(true);
     setMessage("");
 
+    const isNewCustomer = !editing.id;
+
     const payload = {
       name: editing.name.trim(),
       line_name: editing.line_name || null,
@@ -619,7 +655,7 @@ export default function Home() {
       favorite_drink: editing.favorite_drink || null,
       memo: editing.memo || null,
       owner_id: isAdmin ? editing.owner_id : profile.id,
-      created_by: editing.id ? undefined : profile.id
+      created_by: isNewCustomer ? profile.id : undefined
     };
 
     if (!payload.name) {
@@ -628,20 +664,87 @@ export default function Home() {
       return;
     }
 
+    if (isNewCustomer && !editing.initial_visit_date) {
+      setMessage("初回来店日を入力してください。");
+      setBusy(false);
+      return;
+    }
+
+    if (
+      isNewCustomer &&
+      editing.initial_visit_type !== "本指名" &&
+      editing.initial_visit_type !== "場内"
+    ) {
+      setMessage("初回の指名種別を「本指名」か「場内」から選んでください。");
+      setBusy(false);
+      return;
+    }
+
     const cleanPayload = Object.fromEntries(
       Object.entries(payload).filter(([, value]) => value !== undefined)
     );
 
-    const result = editing.id
-      ? await supabase.from("customers").update(cleanPayload).eq("id", editing.id)
-      : await supabase.from("customers").insert(cleanPayload);
+    if (!isNewCustomer) {
+      const { error } = await supabase
+        .from("customers")
+        .update(cleanPayload)
+        .eq("id", editing.id);
 
-    if (result.error) setMessage(`保存できませんでした：${result.error.message}`);
-    else {
-      setEditing(null);
-      setMessage("保存しました。");
-      await loadCustomers();
+      if (error) {
+        setMessage(`保存できませんでした：${error.message}`);
+      } else {
+        setEditing(null);
+        setMessage("顧客基本情報を更新しました。");
+        await loadCustomers();
+      }
+
+      setBusy(false);
+      return;
     }
+
+    const { data: created, error: customerError } = await supabase
+      .from("customers")
+      .insert(cleanPayload)
+      .select("id, owner_id")
+      .single();
+
+    if (customerError || !created?.id) {
+      setMessage(`顧客フォルダを作成できませんでした：${customerError?.message || "不明なエラー"}`);
+      setBusy(false);
+      return;
+    }
+
+    const firstVisit = {
+      customer_id: created.id,
+      owner_id: created.owner_id,
+      visited_at: new Date(`${editing.initial_visit_date}T12:00:00`).toISOString(),
+      amount: Number(editing.initial_visit_amount || 0),
+      visit_type: editing.initial_visit_type,
+      memo: editing.initial_visit_memo || null,
+      created_by: profile.id
+    };
+
+    const { error: visitError } = await supabase
+      .from("visit_histories")
+      .insert(firstVisit);
+
+    if (visitError) {
+      // Avoid leaving a half-created customer when the first visit fails.
+      await supabase.from("customers").delete().eq("id", created.id);
+      setMessage(`初回来店情報を保存できませんでした：${visitError.message}`);
+      setBusy(false);
+      return;
+    }
+
+    setEditing(null);
+    setSelectedCustomerId(created.id);
+    pushHistory({
+      view: "customer",
+      castId: created.owner_id,
+      customerId: created.id
+    });
+    setMessage("顧客フォルダと初回来店情報を登録しました。");
+    await Promise.all([loadCustomers(), loadVisits()]);
     setBusy(false);
   }
 
@@ -822,23 +925,20 @@ export default function Home() {
             </section>
 
             <div className="quickGrid">
-              <button className="quickCard" onClick={() => setAdminTab("search")}>
+              <button className="quickCard" onClick={() => navigateAdminTab("search")}>
                 <span className="quickIcon">⌕</span>
                 <strong>全顧客を探す</strong>
                 <small>名前・担当・来店日などから検索</small>
               </button>
-              <button className="quickCard" onClick={() => setAdminTab("casts")}>
+              <button className="quickCard" onClick={() => navigateAdminTab("casts")}>
                 <span className="quickIcon">♙</span>
                 <strong>キャストから探す</strong>
                 <small>キャスト → 顧客フォルダ</small>
               </button>
             </div>
 
-            <section className="dashboardStats">
+            <section className="dashboardStats singleStat">
               <div><span>表示中キャスト</span><strong>{activeCasts.length}</strong></div>
-              <div><span>全顧客</span><strong>{customers.length}</strong></div>
-              <div><span>来店履歴</span><strong>{totalVisits}</strong></div>
-              <div><span>本指名 / 場内</span><strong>{nominationVisits} / {inhouseVisits}</strong></div>
             </section>
 
             <section className="homeSection">
@@ -847,10 +947,10 @@ export default function Home() {
                   <div className="eyebrow">キャスト</div>
                   <h3>すぐ開く</h3>
                 </div>
-                <button className="textButton" onClick={() => setAdminTab("casts")}>すべて見る ›</button>
+                <button className="textButton" onClick={() => navigateAdminTab("casts")}>すべて見る ›</button>
               </div>
               <div className="miniCastRow">
-                {activeCasts.slice(0, 6).map((cast) => (
+                {activeCasts.map((cast) => (
                   <button key={cast.id} className="miniCast" onClick={() => openCast(cast.id)}>
                     <span>No.{cast.login_id}</span>
                     <strong>{cast.display_name}</strong>
@@ -999,16 +1099,16 @@ export default function Home() {
 
       {isAdmin && !selectedCastId && !selectedCustomerId && !historyOpen && (
         <nav className="bottomNav" aria-label="管理者ナビゲーション">
-          <button className={adminTab === "home" ? "active" : ""} onClick={() => setAdminTab("home")}>
+          <button className={adminTab === "home" ? "active" : ""} onClick={() => navigateAdminTab("home")}>
             <span>⌂</span><small>ホーム</small>
           </button>
-          <button className={adminTab === "search" ? "active" : ""} onClick={() => setAdminTab("search")}>
+          <button className={adminTab === "search" ? "active" : ""} onClick={() => navigateAdminTab("search")}>
             <span>⌕</span><small>全顧客</small>
           </button>
-          <button className={adminTab === "casts" ? "active" : ""} onClick={() => setAdminTab("casts")}>
+          <button className={adminTab === "casts" ? "active" : ""} onClick={() => navigateAdminTab("casts")}>
             <span>♙</span><small>キャスト</small>
           </button>
-          <button className={adminTab === "settings" ? "active" : ""} onClick={() => setAdminTab("settings")}>
+          <button className={adminTab === "settings" ? "active" : ""} onClick={() => navigateAdminTab("settings")}>
             <span>⚙</span><small>設定</small>
           </button>
         </nav>
@@ -1240,6 +1340,71 @@ export default function Home() {
               <div className="wide"><Field label="メモ・会話内容・注意事項"><textarea
                 value={editing.memo || ""} onChange={(e) => setEditing({ ...editing, memo: e.target.value })} />
               </Field></div>
+
+
+              {!editing.id && (
+                <div className="wide initialVisitSection">
+                  <div className="subFormTitle">
+                    <div>
+                      <strong>初回来店情報</strong>
+                      <span>顧客フォルダ作成と同時に1件目の来店履歴として保存されます</span>
+                    </div>
+                  </div>
+
+                  <div className="formGrid nestedGrid">
+                    <Field label="初回来店日">
+                      <input
+                        type="date"
+                        value={editing.initial_visit_date || ""}
+                        onChange={(e) => setEditing({
+                          ...editing,
+                          initial_visit_date: e.target.value
+                        })}
+                      />
+                    </Field>
+
+                    <Field label="指名種別">
+                      <select
+                        value={editing.initial_visit_type || "本指名"}
+                        onChange={(e) => setEditing({
+                          ...editing,
+                          initial_visit_type: e.target.value
+                        })}
+                      >
+                        <option value="本指名">本指名</option>
+                        <option value="場内">場内</option>
+                      </select>
+                    </Field>
+
+                    <Field label="その日の使用金額">
+                      <input
+                        type="number"
+                        min="0"
+                        inputMode="numeric"
+                        value={editing.initial_visit_amount || ""}
+                        onChange={(e) => setEditing({
+                          ...editing,
+                          initial_visit_amount: e.target.value
+                        })}
+                        placeholder="例：80000"
+                      />
+                    </Field>
+
+                    <div className="wide">
+                      <Field label="その日の備考">
+                        <textarea
+                          value={editing.initial_visit_memo || ""}
+                          onChange={(e) => setEditing({
+                            ...editing,
+                            initial_visit_memo: e.target.value
+                          })}
+                          placeholder="例：初回来店。会社の同僚と来店。"
+                        />
+                      </Field>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
             <div className="modalActions">
               {editing.id && isAdmin ? <button type="button" className="danger" onClick={deleteCustomer}>削除</button> : <span />}

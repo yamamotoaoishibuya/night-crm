@@ -258,3 +258,44 @@ body{padding-bottom:env(safe-area-inset-bottom)}
 @media(max-width:390px){
   .quickGrid{grid-template-columns:1fr}
 }
+
+
+/* v1.5.1 */
+.dashboardStats.singleStat{
+  grid-template-columns:minmax(160px,240px);
+  margin-bottom:22px;
+}
+.miniCastRow{
+  display:grid!important;
+  grid-template-columns:1fr!important;
+  gap:8px!important;
+  overflow:visible!important;
+  padding-bottom:0!important;
+}
+.miniCast{
+  width:100%!important;
+  min-width:0!important;
+  display:grid!important;
+  grid-template-columns:72px 1fr auto!important;
+  align-items:center!important;
+  gap:10px!important;
+  padding:13px 15px!important;
+}
+.miniCast span{margin:0!important}
+.miniCast strong{margin:0!important}
+.initialVisitSection{
+  margin-top:18px;
+  padding:15px;
+  border:1px solid #294a6e;
+  background:#091827;
+  border-radius:16px;
+}
+.subFormTitle{margin-bottom:2px}
+.subFormTitle>div{display:flex;flex-direction:column;gap:4px}
+.subFormTitle strong{font-size:16px}
+.subFormTitle span{font-size:12px;color:var(--muted);line-height:1.5}
+.nestedGrid{margin-top:0}
+@media(max-width:680px){
+  .dashboardStats.singleStat{grid-template-columns:1fr}
+  .miniCast{grid-template-columns:62px 1fr auto!important}
+}
