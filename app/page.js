@@ -200,6 +200,16 @@ export default function Home() {
     setBusy(false);
   }
 
+  async function copyAppUrl() {
+    try {
+      const url = window.location.origin;
+      await navigator.clipboard.writeText(url);
+      setMessage("アプリURLをコピーしました。");
+    } catch {
+      setMessage("URLをコピーできませんでした。ブラウザのアドレスバーからコピーしてください。");
+    }
+  }
+
   async function signOut() {
     await supabase.auth.signOut();
   }
@@ -445,6 +455,11 @@ export default function Home() {
       return;
     }
 
+    if (visitDraft.visit_type !== "本指名" && visitDraft.visit_type !== "場内") {
+      setMessage("指名種別を「本指名」か「場内」から選んでください。");
+      return;
+    }
+
     setBusy(true);
     setMessage("");
 
@@ -455,7 +470,7 @@ export default function Home() {
       owner_id: selectedCustomer.owner_id,
       visited_at: visitedAt,
       amount: Number(visitDraft.amount || 0),
-      visit_type: visitDraft.visit_type || "通常",
+      visit_type: visitDraft.visit_type,
       memo: visitDraft.memo || null,
       created_by: profile.id
     };
@@ -1081,8 +1096,15 @@ export default function Home() {
               </button>
               <div className="settingsInfo">
                 <div><strong>ログイン中</strong><span>{profile?.display_name}</span></div>
-                <div><strong>アプリ</strong><span>Night CRM v1.5.0</span></div>
+                <div><strong>アプリ</strong><span>Night CRM v1.5.2</span></div>
               </div>
+              <button onClick={copyAppUrl}>
+                <div>
+                  <strong>アプリURLをコピー</strong>
+                  <span>LINEやメッセージで共有するURLをコピー</span>
+                </div>
+                <b>コピー</b>
+              </button>
               <button className="logoutSetting" onClick={signOut}>
                 <div>
                   <strong>ログアウト</strong>
@@ -1125,15 +1147,17 @@ export default function Home() {
             </div>
 
             <p className="muted">{selectedCustomer.name}</p>
+            <p className="visitModalHint">
+              過去の日付も登録できます。本指名・場内を選んで来店履歴として追加してください。
+            </p>
 
             <Field label="指名種別">
               <select
                 value={visitDraft.visit_type}
                 onChange={(e) => setVisitDraft({ ...visitDraft, visit_type: e.target.value })}
               >
-                <option>本指名</option>
-                <option>場内</option>
-                <option>通常</option>
+                <option value="本指名">本指名</option>
+                <option value="場内">場内</option>
               </select>
             </Field>
 

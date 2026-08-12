@@ -299,3 +299,14 @@ body{padding-bottom:env(safe-area-inset-bottom)}
   .dashboardStats.singleStat{grid-template-columns:1fr}
   .miniCast{grid-template-columns:62px 1fr auto!important}
 }
+
+/* v1.5.2 */
+.visitModalHint{
+  margin:4px 0 2px;
+  padding:10px 12px;
+  border-radius:12px;
+  background:rgba(74,163,255,.09);
+  color:#a9c8e8;
+  font-size:12px;
+  line-height:1.55;
+}
