@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabase";
 
 const emptyCustomer = {
@@ -20,12 +20,13 @@ export default function Home() {
   const [password, setPassword] = useState("");
   const [globalQuery, setGlobalQuery] = useState("");
   const [castQuery, setCastQuery] = useState("");
+  const [customerSort, setCustomerSort] = useState("created");
   const [selectedCastId, setSelectedCastId] = useState("");
   const [selectedCustomerId, setSelectedCustomerId] = useState("");
   const [historyOpen, setHistoryOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [visitModal, setVisitModal] = useState(false);
-  const [visitDraft, setVisitDraft] = useState({ visited_at: "", amount: "", memo: "" });
+  const [visitDraft, setVisitDraft] = useState({ visited_at: "", amount: "", memo: "", visit_type: "本指名" });
   const [castModal, setCastModal] = useState(false);
   const [newCast, setNewCast] = useState(emptyCast);
   const [credentialModal, setCredentialModal] = useState(null);
@@ -35,14 +36,51 @@ export default function Home() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
-  const touchStartX = useRef(null);
-  const touchStartY = useRef(null);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
     const { data } = supabase.auth.onAuthStateChange((_event, nextSession) => setSession(nextSession));
     return () => data.subscription.unsubscribe();
   }, []);
+
+  useEffect(() => {
+    function handlePopState(event) {
+      const state = event.state || {};
+
+      if (state.view === "history") {
+        setSelectedCastId(state.castId || "");
+        setSelectedCustomerId(state.customerId || "");
+        setHistoryOpen(true);
+        return;
+      }
+
+      if (state.view === "customer") {
+        setSelectedCastId(state.castId || "");
+        setSelectedCustomerId(state.customerId || "");
+        setHistoryOpen(false);
+        return;
+      }
+
+      if (state.view === "cast") {
+        setSelectedCastId(state.castId || "");
+        setSelectedCustomerId("");
+        setHistoryOpen(false);
+        return;
+      }
+
+      setSelectedCustomerId("");
+      setHistoryOpen(false);
+
+      if (profile?.role === "admin") {
+        setSelectedCastId("");
+      } else if (profile?.id) {
+        setSelectedCastId(profile.id);
+      }
+    }
+
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, [profile]);
 
   useEffect(() => {
     if (session) loadApp();
@@ -203,6 +241,49 @@ export default function Home() {
     return customerVisits(customerId)[0] || null;
   }
 
+  function latestVisitByType(customerId, type) {
+    return customerVisits(customerId).find((visit) => visit.visit_type === type) || null;
+  }
+
+  function visitTimestamp(visit) {
+    if (!visit?.visited_at) return 0;
+    const time = new Date(visit.visited_at).getTime();
+    return Number.isNaN(time) ? 0 : time;
+  }
+
+  function sortCustomers(list) {
+    const sorted = [...list];
+
+    if (customerSort === "created") {
+      return sorted.sort((a, b) => {
+        const aTime = new Date(a.created_at || 0).getTime() || 0;
+        const bTime = new Date(b.created_at || 0).getTime() || 0;
+        return aTime - bTime;
+      });
+    }
+
+    return sorted.sort((a, b) => {
+      let aVisit = null;
+      let bVisit = null;
+
+      if (customerSort === "latest_nomination") {
+        aVisit = latestVisitByType(a.id, "本指名");
+        bVisit = latestVisitByType(b.id, "本指名");
+      } else if (customerSort === "latest_inhouse") {
+        aVisit = latestVisitByType(a.id, "場内");
+        bVisit = latestVisitByType(b.id, "場内");
+      } else {
+        aVisit = latestVisit(a.id);
+        bVisit = latestVisit(b.id);
+      }
+
+      const diff = visitTimestamp(bVisit) - visitTimestamp(aVisit);
+      if (diff !== 0) return diff;
+
+      return String(a.name || "").localeCompare(String(b.name || ""), "ja");
+    });
+  }
+
   const globalResults = useMemo(() => {
     const word = globalQuery.trim().toLowerCase();
     if (!word) return [];
@@ -216,6 +297,19 @@ export default function Home() {
 
   const selectedCast = profiles.find((item) => item.id === selectedCastId);
   const selectedCustomer = customers.find((item) => item.id === selectedCustomerId);
+
+  function replaceBaseHistory(me) {
+    const state =
+      me.role === "admin"
+        ? { view: "casts" }
+        : { view: "cast", castId: me.id };
+
+    window.history.replaceState(state, "", window.location.pathname);
+  }
+
+  function pushHistory(state) {
+    window.history.pushState(state, "", window.location.pathname);
+  }
 
   const selectedCustomers = useMemo(() => {
     const word = castQuery.trim().toLowerCase();
@@ -235,6 +329,7 @@ export default function Home() {
     setCastQuery("");
     setGlobalQuery("");
     setMessage("");
+    pushHistory({ view: "cast", castId: id });
   }
 
   function openCustomer(id) {
@@ -242,44 +337,13 @@ export default function Home() {
     setHistoryOpen(false);
     setGlobalQuery("");
     setMessage("");
+    pushHistory({ view: "customer", castId: selectedCastId, customerId: id });
   }
 
   function goBack() {
-    if (editing || visitModal || castModal || credentialModal || passwordModal || hiddenModal) return;
-
-    if (historyOpen) {
-      setHistoryOpen(false);
-      return;
-    }
-
-    if (selectedCustomerId) {
-      setSelectedCustomerId("");
-      return;
-    }
-
-    if (isAdmin && selectedCastId) {
-      setSelectedCastId("");
-    }
+    window.history.back();
   }
 
-  function handleTouchStart(event) {
-    const touch = event.touches?.[0];
-    if (!touch) return;
-    touchStartX.current = touch.clientX;
-    touchStartY.current = touch.clientY;
-  }
-
-  function handleTouchEnd(event) {
-    if (touchStartX.current === null || touchStartY.current === null) return;
-    const touch = event.changedTouches?.[0];
-    if (!touch) return;
-
-    const deltaX = touch.clientX - touchStartX.current;
-    const deltaY = Math.abs(touch.clientY - touchStartY.current);
-
-    if (touchStartX.current <= 35 && deltaX >= 80 && deltaY <= 70) {
-      goBack();
-    }
 
     touchStartX.current = null;
     touchStartY.current = null;
@@ -313,7 +377,7 @@ export default function Home() {
       owner_id: selectedCustomer.owner_id,
       visited_at: visitedAt,
       amount: Number(visitDraft.amount || 0),
-      visit_type: "通常",
+      visit_type: visitDraft.visit_type || "通常",
       memo: visitDraft.memo || null,
       created_by: profile.id
     };
@@ -324,7 +388,7 @@ export default function Home() {
       setMessage(`来店履歴を保存できませんでした：${error.message}`);
     } else {
       setVisitModal(false);
-      setVisitDraft({ visited_at: "", amount: "", memo: "" });
+      setVisitDraft({ visited_at: "", amount: "", memo: "", visit_type: "本指名" });
       setMessage("来店記録を追加しました。");
       await loadVisits();
     }
@@ -605,7 +669,7 @@ export default function Home() {
   const showingGlobalResults = isAdmin && globalQuery.trim();
 
   return (
-    <div onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
+    <div>
       <header>
         <div>
           <h1>{isAdmin ? "キャスト別 顧客管理" : "自分の顧客"}</h1>
@@ -635,7 +699,7 @@ export default function Home() {
           <HistoryView
             customer={selectedCustomer}
             visits={customerVisits(selectedCustomer.id)}
-            onBack={() => setHistoryOpen(false)}
+            onBack={goBack}
           />
         ) : selectedCustomer ? (
           <CustomerOverview
@@ -643,16 +707,24 @@ export default function Home() {
             latest={latestVisit(selectedCustomer.id)}
             visits={customerVisits(selectedCustomer.id)}
             castName={castName}
-            onBack={() => setSelectedCustomerId("")}
+            onBack={goBack}
             onAddVisit={() => {
               setVisitDraft({
                 visited_at: new Date().toISOString().slice(0, 10),
                 amount: "",
-                memo: ""
+                memo: "",
+                visit_type: "本指名"
               });
               setVisitModal(true);
             }}
-            onHistory={() => setHistoryOpen(true)}
+            onHistory={() => {
+              setHistoryOpen(true);
+              pushHistory({
+                view: "history",
+                castId: selectedCastId,
+                customerId: selectedCustomer.id
+              });
+            }}
             onEdit={() => setEditing({ ...selectedCustomer })}
           />
         ) : showingGlobalResults ? (
@@ -664,6 +736,7 @@ export default function Home() {
             <CustomerFolderList
               customers={globalResults}
               latestVisit={latestVisit}
+              latestVisitByType={latestVisitByType}
               castName={castName}
               showCast
               onOpen={(customer) => openCustomer(customer.id)}
@@ -722,7 +795,7 @@ export default function Home() {
           <>
             <div className="castPageHeader">
               <div>
-                {isAdmin && <button className="backButton" onClick={() => setSelectedCastId("")}>‹ キャスト一覧</button>}
+                {isAdmin && <button className="backButton" onClick={goBack}>‹ キャスト一覧</button>}
                 <h2>{selectedCast?.display_name || profile?.display_name}の顧客</h2>
                 <span className="muted">{selectedCustomers.length}名</span>
               </div>
@@ -737,6 +810,7 @@ export default function Home() {
             <CustomerFolderList
               customers={selectedCustomers}
               latestVisit={latestVisit}
+              latestVisitByType={latestVisitByType}
               castName={castName}
               showCast={false}
               onOpen={(customer) => openCustomer(customer.id)}
@@ -758,6 +832,17 @@ export default function Home() {
             </div>
 
             <p className="muted">{selectedCustomer.name}</p>
+
+            <Field label="指名種別">
+              <select
+                value={visitDraft.visit_type}
+                onChange={(e) => setVisitDraft({ ...visitDraft, visit_type: e.target.value })}
+              >
+                <option>本指名</option>
+                <option>場内</option>
+                <option>通常</option>
+              </select>
+            </Field>
 
             <Field label="来店日">
               <input
@@ -983,7 +1068,7 @@ function CredentialRow({ label, value }) {
   );
 }
 
-function CustomerFolderList({ customers, latestVisit, castName, showCast, onOpen }) {
+function CustomerFolderList({ customers, latestVisit, latestVisitByType, castName, showCast, onOpen }) {
   if (customers.length === 0) {
     return <div className="empty">該当する顧客がありません。</div>;
   }
@@ -992,6 +1077,14 @@ function CustomerFolderList({ customers, latestVisit, castName, showCast, onOpen
     <div className="customerFolderGrid">
       {customers.map((customer) => {
         const latest = latestVisit(customer.id);
+        const latestNomination = latestVisitByType(customer.id, "本指名");
+        const latestInhouse = latestVisitByType(customer.id, "場内");
+        const latestType =
+          latest?.visit_type === "本指名"
+            ? "本指名"
+            : latest?.visit_type === "場内"
+              ? "場内"
+              : latest?.visit_type || "未登録";
 
         return (
           <button className="customerFolder" key={customer.id} onClick={() => onOpen(customer)}>
@@ -999,7 +1092,14 @@ function CustomerFolderList({ customers, latestVisit, castName, showCast, onOpen
             <div className="customerFolderText">
               <strong>{customer.name}</strong>
               {showCast && <span>担当：{castName(customer.owner_id)}</span>}
-              <small>最終来店：{latest ? formatDate(latest.visited_at) : "未登録"}</small>
+              <small>
+                最終来店：{latest ? formatDate(latest.visited_at) : "未登録"}
+                {latest ? `（${latestType}）` : ""}
+              </small>
+              <small className="subVisitInfo">
+                本指名：{latestNomination ? formatDate(latestNomination.visited_at) : "なし"} ／
+                場内：{latestInhouse ? formatDate(latestInhouse.visited_at) : "なし"}
+              </small>
             </div>
             <div className="chevron">›</div>
           </button>
@@ -1079,7 +1179,10 @@ function HistoryView({ customer, visits, onBack }) {
           {visits.map((visit) => (
             <article className="historyCard" key={visit.id}>
               <div className="historyTop">
-                <strong>{formatDate(visit.visited_at)}</strong>
+                <div className="historyDateGroup">
+                  <strong>{formatDate(visit.visited_at)}</strong>
+                  <span className="visitTypeBadge">{visit.visit_type || "通常"}</span>
+                </div>
                 <span>¥{Number(visit.amount || 0).toLocaleString()}</span>
               </div>
               <p>{visit.memo || "備考なし"}</p>

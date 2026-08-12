@@ -113,3 +113,14 @@ h1,h2{margin:0}.globalSearch{position:sticky;top:72px;z-index:19;padding:11px 16
   .customerActionGrid{grid-template-columns:1fr}
   .infoRow{grid-template-columns:1fr;gap:5px}
 }
+
+.customerSortBar{display:flex;align-items:center;gap:10px;margin:0 0 13px;padding:10px 12px;border:1px solid var(--line);background:#0a192a;border-radius:14px}
+.customerSortBar span{font-size:13px;color:var(--muted);white-space:nowrap}
+.customerSortBar select{max-width:240px;margin-left:auto}
+.subVisitInfo{color:#7ea4c8!important}
+.historyDateGroup{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.visitTypeBadge{font-size:11px!important;font-weight:700!important;padding:4px 7px;border-radius:999px;background:#173558;color:#bfe0ff!important}
+@media(max-width:680px){
+  .customerSortBar{align-items:stretch;flex-direction:column}
+  .customerSortBar select{max-width:none;margin-left:0}
+}
