@@ -432,3 +432,18 @@ body{padding-bottom:env(safe-area-inset-bottom)}
 @media(max-width:680px){
   .hitReason{grid-template-columns:1fr;gap:4px}
 }
+
+/* v1.6.4 */
+.companionEntry{display:grid;gap:7px}
+.companionNameField{display:grid;gap:5px}
+.linkedCustomerBadge{padding:5px 8px;border-radius:9px;background:rgba(95,211,156,.11);border:1px solid rgba(95,211,156,.27);color:#91dfb8;font-size:10px}
+.companionCandidates{padding:9px;border-radius:13px;border:1px solid #294b70;background:#071524;display:grid;gap:6px}
+.candidateHeading{color:#7ebdff;font-size:11px;font-weight:800;padding:2px 3px 4px}
+.companionCandidate{width:100%;border:1px solid var(--line);background:#0d2035;color:var(--text);border-radius:11px;padding:10px;text-align:left}
+.candidateTop{display:flex;justify-content:space-between;gap:10px;align-items:center}
+.candidateTop strong{font-size:14px}
+.candidateTop span{font-size:10px;color:#78b9f5}
+.candidateDetails{display:flex;flex-wrap:wrap;gap:4px 10px;margin-top:6px}
+.candidateDetails span{color:var(--muted);font-size:10px;line-height:1.45}
+.candidateFoot{color:var(--muted);font-size:10px;padding:3px}
+@media(max-width:680px){.candidateTop{align-items:flex-start;flex-direction:column;gap:3px}}

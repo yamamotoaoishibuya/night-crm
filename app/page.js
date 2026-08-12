@@ -9,7 +9,8 @@ const emptyCustomer = {
   initial_visit_date: "",
   initial_visit_type: "本指名",
   initial_visit_amount: "",
-  initial_visit_memo: ""
+  initial_visit_memo: "",
+  initial_visit_companions: []
 };
 
 const emptyCast = { displayName: "", loginId: "" };
@@ -555,7 +556,7 @@ export default function Home() {
   function addCompanionRow() {
     setVisitDraft({
       ...visitDraft,
-      companions: [...(visitDraft.companions || []), { name: "", type: "指名なし", cast_name: "" }]
+      companions: [...(visitDraft.companions || []), { name: "", type: "指名なし", cast_name: "", linked_customer_id: "" }]
     });
   }
 
@@ -569,6 +570,68 @@ export default function Home() {
     const next = [...(visitDraft.companions || [])];
     next.splice(index, 1);
     setVisitDraft({ ...visitDraft, companions: next });
+  }
+
+  function addInitialCompanionRow() {
+    setEditing({
+      ...editing,
+      initial_visit_companions: [
+        ...(editing.initial_visit_companions || []),
+        { name: "", type: "指名なし", cast_name: "", linked_customer_id: "" }
+      ]
+    });
+  }
+
+  function updateInitialCompanionRow(index, field, value) {
+    const next = [...(editing.initial_visit_companions || [])];
+    next[index] = { ...next[index], [field]: value };
+    setEditing({ ...editing, initial_visit_companions: next });
+  }
+
+  function removeInitialCompanionRow(index) {
+    const next = [...(editing.initial_visit_companions || [])];
+    next.splice(index, 1);
+    setEditing({ ...editing, initial_visit_companions: next });
+  }
+
+  function selectVisitCompanionCustomer(index, customer) {
+    const next = [...(visitDraft.companions || [])];
+    next[index] = {
+      ...next[index],
+      name: customer.name,
+      linked_customer_id: customer.id,
+      cast_name:
+        next[index]?.type === "本指名" || next[index]?.type === "場内"
+          ? castName(customer.owner_id)
+          : next[index]?.cast_name || ""
+    };
+    setVisitDraft({ ...visitDraft, companions: next });
+  }
+
+  function selectInitialCompanionCustomer(index, customer) {
+    const next = [...(editing.initial_visit_companions || [])];
+    next[index] = {
+      ...next[index],
+      name: customer.name,
+      linked_customer_id: customer.id,
+      cast_name:
+        next[index]?.type === "本指名" || next[index]?.type === "場内"
+          ? castName(customer.owner_id)
+          : next[index]?.cast_name || ""
+    };
+    setEditing({ ...editing, initial_visit_companions: next });
+  }
+
+  function clearVisitCompanionLink(index) {
+    const next = [...(visitDraft.companions || [])];
+    next[index] = { ...next[index], linked_customer_id: "" };
+    setVisitDraft({ ...visitDraft, companions: next });
+  }
+
+  function clearInitialCompanionLink(index) {
+    const next = [...(editing.initial_visit_companions || [])];
+    next[index] = { ...next[index], linked_customer_id: "" };
+    setEditing({ ...editing, initial_visit_companions: next });
   }
 
   async function saveVisit(event) {
@@ -596,7 +659,8 @@ export default function Home() {
         cast_name:
           item.type === "本指名" || item.type === "場内"
             ? String(item.cast_name || "").trim()
-            : ""
+            : "",
+        linked_customer_id: item.linked_customer_id || ""
       }))
       .filter((item) => item.name);
 
@@ -704,7 +768,8 @@ export default function Home() {
         ? visit.companions.map((item) => ({
             name: item.name || "",
             type: item.type || "指名なし",
-            cast_name: item.cast_name || ""
+            cast_name: item.cast_name || "",
+            linked_customer_id: item.linked_customer_id || ""
           }))
         : []
     });
@@ -919,6 +984,32 @@ export default function Home() {
       return;
     }
 
+    const initialCompanions = (editing.initial_visit_companions || [])
+      .map((item) => ({
+        name: String(item.name || "").trim(),
+        type: item.type || "指名なし",
+        cast_name:
+          item.type === "本指名" || item.type === "場内"
+            ? String(item.cast_name || "").trim()
+            : "",
+        linked_customer_id: item.linked_customer_id || ""
+      }))
+      .filter((item) => item.name);
+
+    if (isNewCustomer) {
+      const missingInitialCast = initialCompanions.find(
+        (item) =>
+          (item.type === "本指名" || item.type === "場内") &&
+          !item.cast_name
+      );
+
+      if (missingInitialCast) {
+        setMessage(`${missingInitialCast.name}さんの指名キャスト名を入力してください。`);
+        setBusy(false);
+        return;
+      }
+    }
+
     const cleanPayload = Object.fromEntries(
       Object.entries(payload).filter(([, value]) => value !== undefined)
     );
@@ -937,7 +1028,10 @@ export default function Home() {
 
       const earliest = firstVisit(editing.id);
       if (earliest && editing.initial_visit_type) {
-        const firstPatch = { visit_type: editing.initial_visit_type };
+        const firstPatch = {
+          visit_type: editing.initial_visit_type,
+          companions: initialCompanions
+        };
         if (editing.initial_visit_date) {
           firstPatch.visited_at =
             new Date(`${editing.initial_visit_date}T12:00:00`).toISOString();
@@ -981,7 +1075,7 @@ export default function Home() {
       amount: Number(editing.initial_visit_amount || 0),
       visit_type: editing.initial_visit_type,
       memo: editing.initial_visit_memo || null,
-      companions: [],
+      companions: initialCompanions,
       created_by: profile.id
     };
 
@@ -1145,7 +1239,15 @@ export default function Home() {
                 initial_visit_date: earliest?.visited_at
                   ? new Date(earliest.visited_at).toISOString().slice(0, 10)
                   : "",
-                initial_visit_type: earliest?.visit_type || "本指名"
+                initial_visit_type: earliest?.visit_type || "本指名",
+                initial_visit_companions: Array.isArray(earliest?.companions)
+                  ? earliest.companions.map((item) => ({
+                      name: item.name || "",
+                      type: item.type || "指名なし",
+                      cast_name: item.cast_name || "",
+                      linked_customer_id: item.linked_customer_id || ""
+                    }))
+                  : []
               });
             }}
           />
@@ -1363,7 +1465,7 @@ export default function Home() {
               </button>
               <div className="settingsInfo">
                 <div><strong>ログイン中</strong><span>{profile?.display_name}</span></div>
-                <div><strong>アプリ</strong><span>Night CRM v1.6.3</span></div>
+                <div><strong>アプリ</strong><span>Night CRM v1.6.4</span></div>
               </div>
               <button onClick={copyAppUrl}>
                 <div>
@@ -1453,44 +1555,17 @@ export default function Home() {
                 placeholder="例：同僚2名と来店。次回は月末予定。"
               />
             </Field>
-            <div className="companionSection">
-              <div className="companionHeader">
-                <div>
-                  <strong>一緒に来た人</strong>
-                  <span>名前と、本指名・場内・指名なしを登録</span>
-                </div>
-                <button type="button" className="secondary" onClick={addCompanionRow}>＋ 連れを追加</button>
-              </div>
-
-              {(visitDraft.companions || []).length === 0 ? (
-                <div className="companionEmpty">連れの登録なし</div>
-              ) : (
-                <div className="companionList">
-                  {(visitDraft.companions || []).map((companion, index) => (
-                    <div className="companionRow" key={index}>
-                      <input value={companion.name}
-                        onChange={(e) => updateCompanionRow(index, "name", e.target.value)}
-                        placeholder="名前" />
-                      <select value={companion.type}
-                        onChange={(e) => updateCompanionRow(index, "type", e.target.value)}>
-                        <option value="本指名">本指名</option>
-                        <option value="場内">場内</option>
-                        <option value="指名なし">指名なし</option>
-                      </select>
-                      {(companion.type === "本指名" || companion.type === "場内") && (
-                        <input
-                          value={companion.cast_name || ""}
-                          onChange={(e) => updateCompanionRow(index, "cast_name", e.target.value)}
-                          placeholder="誰を指名？ キャスト名"
-                        />
-                      )}
-                      <button type="button" className="removeCompanion"
-                        onClick={() => removeCompanionRow(index)}>×</button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+            <CompanionEditor
+              companions={visitDraft.companions || []}
+              customers={customers}
+              excludeCustomerId={selectedCustomer?.id || ""}
+              castName={castName}
+              onAdd={addCompanionRow}
+              onUpdate={updateCompanionRow}
+              onRemove={removeCompanionRow}
+              onSelectCustomer={selectVisitCompanionCustomer}
+              onClearLink={clearVisitCompanionLink}
+            />
 
             <button className="primary full" disabled={busy}>
               {busy ? "保存中…" : editingVisitId ? "変更を保存" : "来店記録を保存"}
@@ -1710,7 +1785,23 @@ export default function Home() {
                       </select>
                     </Field>
 
-                    {!editing.id && (
+                                        {editing.id && (
+                      <div className="wide">
+                        <CompanionEditor
+                          companions={editing.initial_visit_companions || []}
+                          customers={customers}
+                          excludeCustomerId={editing.id || ""}
+                          castName={castName}
+                          onAdd={addInitialCompanionRow}
+                          onUpdate={updateInitialCompanionRow}
+                          onRemove={removeInitialCompanionRow}
+                          onSelectCustomer={selectInitialCompanionCustomer}
+                          onClearLink={clearInitialCompanionLink}
+                        />
+                      </div>
+                    )}
+
+{!editing.id && (
                       <>
                     <Field label="その日の使用金額">
                       <input
@@ -1738,6 +1829,19 @@ export default function Home() {
                         />
                       </Field>
                     </div>
+                        <div className="wide">
+                          <CompanionEditor
+                            companions={editing.initial_visit_companions || []}
+                            customers={customers}
+                            excludeCustomerId={editing.id || ""}
+                            castName={castName}
+                            onAdd={addInitialCompanionRow}
+                            onUpdate={updateInitialCompanionRow}
+                            onRemove={removeInitialCompanionRow}
+                            onSelectCustomer={selectInitialCompanionCustomer}
+                            onClearLink={clearInitialCompanionLink}
+                          />
+                        </div>
                       </>
                     )}
                   </div>
@@ -1795,6 +1899,135 @@ function CredentialRow({ label, value }) {
     <div className="credentialRow">
       <div><span>{label}</span><strong>{value}</strong></div>
       <button className="secondary" onClick={copyValue}>コピー</button>
+    </div>
+  );
+}
+
+function CompanionEditor({
+  companions,
+  customers,
+  excludeCustomerId,
+  castName,
+  onAdd,
+  onUpdate,
+  onRemove,
+  onSelectCustomer,
+  onClearLink
+}) {
+  function candidatesFor(companion) {
+    const word = String(companion.name || "").trim().toLowerCase();
+    if (!word || companion.linked_customer_id) return [];
+
+    return customers
+      .filter((customer) => {
+        if (customer.id === excludeCustomerId) return false;
+        return String(customer.name || "").toLowerCase().includes(word);
+      })
+      .slice(0, 8);
+  }
+
+  function linkedCustomer(companion) {
+    if (!companion.linked_customer_id) return null;
+    return customers.find((customer) => customer.id === companion.linked_customer_id) || null;
+  }
+
+  return (
+    <div className="companionSection">
+      <div className="companionHeader">
+        <div>
+          <strong>一緒に来た人</strong>
+          <span>登録済み顧客なら候補から本人を選べます。該当しなければ名前のまま保存できます。</span>
+        </div>
+        <button type="button" className="secondary" onClick={onAdd}>＋ 連れを追加</button>
+      </div>
+
+      {companions.length === 0 ? (
+        <div className="companionEmpty">連れの登録なし</div>
+      ) : (
+        <div className="companionList">
+          {companions.map((companion, index) => {
+            const candidates = candidatesFor(companion);
+            const linked = linkedCustomer(companion);
+
+            return (
+              <div className="companionEntry" key={index}>
+                <div className="companionRow">
+                  <div className="companionNameField">
+                    <input
+                      value={companion.name}
+                      onChange={(e) => {
+                        onClearLink(index);
+                        onUpdate(index, "name", e.target.value);
+                      }}
+                      placeholder="名前・苗字・ニックネーム"
+                    />
+                    {linked && (
+                      <div className="linkedCustomerBadge">
+                        登録済み顧客：{linked.name} / 担当 {castName(linked.owner_id)}
+                      </div>
+                    )}
+                  </div>
+
+                  <select
+                    value={companion.type}
+                    onChange={(e) => {
+                      const nextType = e.target.value;
+                      onUpdate(index, "type", nextType);
+                      if (nextType === "指名なし") {
+                        onUpdate(index, "cast_name", "");
+                      } else if (linked) {
+                        onUpdate(index, "cast_name", castName(linked.owner_id));
+                      }
+                    }}
+                  >
+                    <option value="本指名">本指名</option>
+                    <option value="場内">場内</option>
+                    <option value="指名なし">指名なし</option>
+                  </select>
+
+                  {(companion.type === "本指名" || companion.type === "場内") && (
+                    <input
+                      value={companion.cast_name || ""}
+                      onChange={(e) => onUpdate(index, "cast_name", e.target.value)}
+                      placeholder="誰を指名？ キャスト名"
+                    />
+                  )}
+
+                  <button type="button" className="removeCompanion" onClick={() => onRemove(index)}>×</button>
+                </div>
+
+                {candidates.length > 0 && (
+                  <div className="companionCandidates">
+                    <div className="candidateHeading">登録済み顧客の候補</div>
+                    {candidates.map((customer) => (
+                      <button
+                        type="button"
+                        key={customer.id}
+                        className="companionCandidate"
+                        onClick={() => onSelectCustomer(index, customer)}
+                      >
+                        <div className="candidateTop">
+                          <strong>{customer.name}</strong>
+                          <span>担当：{castName(customer.owner_id)}</span>
+                        </div>
+                        <div className="candidateDetails">
+                          {customer.line_name && <span>LINE：{customer.line_name}</span>}
+                          {customer.memo && <span>備考：{customer.memo}</span>}
+                          {customer.bottle_number && <span>ボトル番号：{customer.bottle_number}</span>}
+                          {customer.bottle_name && <span>ボトル名：{customer.bottle_name}</span>}
+                        </div>
+                      </button>
+                    ))}
+                    <div className="candidateFoot">
+                      該当する人がいなければ候補を選ばず、そのまま保存できます。
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -1992,7 +2225,8 @@ function HistoryView({ customer, visits, onBack, onEditVisit }) {
                         {companion.name}（{companion.type || "指名なし"}
                         {(companion.type === "本指名" || companion.type === "場内") && companion.cast_name
                           ? `：${companion.cast_name}`
-                          : ""}）
+                          : ""}
+                        {companion.linked_customer_id ? "・登録済み" : ""}）
                       </span>
                     ))}
                   </div>
