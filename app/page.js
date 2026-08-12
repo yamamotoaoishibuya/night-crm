@@ -21,6 +21,8 @@ export default function Home() {
   const [globalQuery, setGlobalQuery] = useState("");
   const [castQuery, setCastQuery] = useState("");
   const [customerSort, setCustomerSort] = useState("created");
+  const [adminTab, setAdminTab] = useState("home");
+  const [castActionTarget, setCastActionTarget] = useState(null);
   const [selectedCastId, setSelectedCastId] = useState("");
   const [selectedCustomerId, setSelectedCustomerId] = useState("");
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -228,6 +230,10 @@ export default function Home() {
     return counts;
   }, [customers]);
 
+  const totalVisits = visits.length;
+  const nominationVisits = visits.filter((visit) => visit.visit_type === "本指名").length;
+  const inhouseVisits = visits.filter((visit) => visit.visit_type === "場内").length;
+
   function castName(id) {
     const item = profiles.find((profileItem) => profileItem.id === id);
     if (!item) return "未設定";
@@ -287,18 +293,51 @@ export default function Home() {
     });
   }
 
+  function normalizeSearchDate(value) {
+    return String(value || "").trim().replace(/[年月.\-]/g, "/").replace(/日/g, "");
+  }
+
+  function visitSearchText(customerId) {
+    return customerVisits(customerId).map((visit) => {
+      if (!visit.visited_at) return "";
+      const date = new Date(visit.visited_at);
+      if (Number.isNaN(date.getTime())) return String(visit.visited_at);
+      const y = date.getFullYear();
+      const m = date.getMonth() + 1;
+      const d = date.getDate();
+      return [
+        `${y}/${m}/${d}`,
+        `${y}/${String(m).padStart(2, "0")}/${String(d).padStart(2, "0")}`,
+        `${m}/${d}`,
+        `${String(m).padStart(2, "0")}/${String(d).padStart(2, "0")}`,
+        `${y}年${m}月${d}日`,
+        `${m}月${d}日`
+      ].join(" ");
+    }).join(" ");
+  }
+
+  function globalMatchInfo(customer, rawWord) {
+    const word = rawWord.trim().toLowerCase();
+    if (!word) return { matched: false, nameMatched: false };
+    const nameMatched = String(customer.name || "").toLowerCase().includes(word);
+    const baseText = [
+      customer.line_name, customer.phone, customer.job, customer.rank,
+      customer.favorite_drink, customer.memo, castName(customer.owner_id),
+      profiles.find((item) => item.id === customer.owner_id)?.login_id
+    ].filter(Boolean).join(" ").toLowerCase();
+    const normalizedWord = normalizeSearchDate(word);
+    const visitsText = normalizeSearchDate(visitSearchText(customer.id).toLowerCase());
+    return {
+      matched: nameMatched || baseText.includes(word) ||
+        (normalizedWord && visitsText.includes(normalizedWord)),
+      nameMatched
+    };
+  }
+
   const globalResults = useMemo(() => {
     const word = globalQuery.trim().toLowerCase();
     if (!word) return [];
-
-    const filtered = customers.filter((customer) =>
-      [customer.name, customer.line_name, customer.phone, customer.job, customer.rank,
-       customer.favorite_drink, customer.memo, castName(customer.owner_id),
-       profiles.find((item) => item.id === customer.owner_id)?.login_id]
-        .filter(Boolean).join(" ").toLowerCase().includes(word)
-    );
-
-    return sortCustomers(filtered);
+    return sortCustomers(customers.filter((customer) => globalMatchInfo(customer, word).matched));
   }, [customers, globalQuery, profiles, visits, customerSort]);
 
   const selectedCast = profiles.find((item) => item.id === selectedCastId);
@@ -577,8 +616,6 @@ export default function Home() {
       job: editing.job || null,
       birthday: editing.birthday || null,
       rank: editing.rank,
-      last_visit: editing.last_visit || null,
-      spend: Number(editing.spend || 0),
       favorite_drink: editing.favorite_drink || null,
       memo: editing.memo || null,
       owner_id: isAdmin ? editing.owner_id : profile.id,
@@ -671,31 +708,34 @@ export default function Home() {
     );
   }
 
-  const showingGlobalResults = isAdmin && globalQuery.trim();
+  const showingGlobalResults = isAdmin && adminTab === "search" && globalQuery.trim();
 
   return (
     <div>
-      <header>
+      <header className="appHeader">
         <div>
-          <h1>{isAdmin ? "キャスト別 顧客管理" : "自分の顧客"}</h1>
-          <div className="muted small">{profile?.display_name}・{isAdmin ? "管理者" : "キャスト"}</div>
+          <div className="appBrand">Night CRM</div>
+          <div className="headerContext">
+            {selectedCustomer
+              ? selectedCustomer.name
+              : selectedCastId
+                ? `${selectedCast?.display_name || profile?.display_name}の顧客`
+                : isAdmin
+                  ? adminTab === "home"
+                    ? "ホーム"
+                    : adminTab === "search"
+                      ? "全顧客検索"
+                      : adminTab === "casts"
+                        ? "キャスト"
+                        : "設定"
+                  : "自分の顧客"}
+          </div>
         </div>
-        <div className="headerActions">
-          {!isAdmin && (
-            <button className="secondary" onClick={() => setPasswordModal(true)}>
-              パスワード変更
-            </button>
-          )}
-          <button className="secondary" onClick={signOut}>ログアウト</button>
+        <div className="headerUser">
+          <strong>{profile?.display_name}</strong>
+          <span>{isAdmin ? "管理者" : `ID ${profile?.login_id || ""}`}</span>
         </div>
       </header>
-
-      {isAdmin && !selectedCustomerId && (
-        <section className="globalSearch">
-          <input value={globalQuery} onChange={(e) => setGlobalQuery(e.target.value)}
-            placeholder="全顧客を検索（名前・LINE・電話・メモ・担当キャスト・ログインID）" />
-        </section>
-      )}
 
       <main className="content">
         {message && <div className="notice">{message}</div>}
@@ -732,103 +772,36 @@ export default function Home() {
             }}
             onEdit={() => setEditing({ ...selectedCustomer })}
           />
-        ) : showingGlobalResults ? (
+        ) : selectedCastId ? (
           <>
-            <div className="sectionTitle">
-              <div><h2>全体検索結果</h2><span className="muted">{globalResults.length}件</span></div>
-              <button className="secondary" onClick={() => setGlobalQuery("")}>閉じる</button>
-            </div>
-            <div className="customerSortBar">
-              <span>並び順</span>
-              <select value={customerSort} onChange={(e) => setCustomerSort(e.target.value)}>
-                <option value="created">登録順</option>
-                <option value="latest_visit">最終来店日順</option>
-                <option value="latest_nomination">最終本指名日順</option>
-                <option value="latest_inhouse">最終場内日順</option>
-              </select>
-            </div>
-            <CustomerFolderList
-              customers={globalResults}
-              latestVisit={latestVisit}
-              latestVisitByType={latestVisitByType}
-              castName={castName}
-              showCast
-              onOpen={(customer) => openCustomer(customer.id)}
-            />
-          </>
-        ) : !selectedCastId && isAdmin ? (
-          <>
-            <div className="sectionTitle">
+            <div className="pageHero compactHero">
               <div>
-                <h2>キャスト一覧</h2>
-                <span className="muted">ログインIDの小さい順・名前をタップすると顧客一覧が開きます</span>
+                {isAdmin && <button className="backButton" onClick={goBack}>‹ キャスト一覧へ</button>}
+                <div className="eyebrow">顧客フォルダ</div>
+                <h2>{selectedCast?.display_name || profile?.display_name}</h2>
+                <p>{selectedCustomers.length}名の顧客</p>
               </div>
-              <div className="sectionActions">
-                <button className="secondary" onClick={() => setHiddenModal(true)}>
-                  非表示キャスト（{hiddenCasts.length}）
-                </button>
-                <button className="primary" onClick={() => setCastModal(true)}>＋ キャスト追加</button>
+              <button className="primary heroAction" onClick={openNewCustomer}>＋ 顧客追加</button>
+            </div>
+
+            <div className="toolbarCard">
+              <div className="searchFieldWithIcon">
+                <span>⌕</span>
+                <input
+                  value={castQuery}
+                  onChange={(e) => setCastQuery(e.target.value)}
+                  placeholder="名前・LINE・電話・メモから検索"
+                />
               </div>
-            </div>
-
-            <div className="castGrid">
-              {activeCasts.map((cast) => (
-                <article className="castFolder" key={cast.id}>
-                  <button className="folderOpen" onClick={() => openCast(cast.id)}>
-                    <div className="castNumberBadge">
-                      <span>No.</span>
-                      <strong>{cast.login_id}</strong>
-                    </div>
-                    <div className="castFolderText">
-                      <strong>{cast.display_name}</strong>
-                      <span>{castCounts[cast.id] || 0}名の顧客</span>
-                      <small>ログインID：{cast.login_id}</small>
-                      <small className={cast.must_change_password ? "statusPending" : "statusDone"}>
-                        パスワード：{cast.must_change_password ? "初期設定待ち" : "変更済み"}
-                      </small>
-                    </div>
-                    <div className="chevron">›</div>
-                  </button>
-                  <div className="castCardActions">
-                    <button className="resetButton" onClick={() => resetCastPassword(cast)}>
-                      パスワード再発行
-                    </button>
-                    <button className="hideButton" onClick={() => hideCast(cast)}>
-                      非表示にする
-                    </button>
-                  </div>
-                </article>
-              ))}
-            </div>
-
-            {activeCasts.length === 0 && (
-              <div className="empty">「＋ キャスト追加」から最初のキャストを登録してください。</div>
-            )}
-          </>
-        ) : (
-          <>
-            <div className="castPageHeader">
-              <div>
-                {isAdmin && <button className="backButton" onClick={goBack}>‹ キャスト一覧</button>}
-                <h2>{selectedCast?.display_name || profile?.display_name}の顧客</h2>
-                <span className="muted">{selectedCustomers.length}名</span>
-              </div>
-              <button className="primary" onClick={openNewCustomer}>＋ 顧客追加</button>
-            </div>
-
-            <div className="castSearch">
-              <input value={castQuery} onChange={(e) => setCastQuery(e.target.value)}
-                placeholder="このキャストの顧客を検索" />
-            </div>
-
-            <div className="customerSortBar">
-              <span>並び順</span>
-              <select value={customerSort} onChange={(e) => setCustomerSort(e.target.value)}>
-                <option value="created">登録順</option>
-                <option value="latest_visit">最終来店日順</option>
-                <option value="latest_nomination">最終本指名日順</option>
-                <option value="latest_inhouse">最終場内日順</option>
-              </select>
+              <label className="sortControl">
+                <span>並び順</span>
+                <select value={customerSort} onChange={(e) => setCustomerSort(e.target.value)}>
+                  <option value="created">登録順</option>
+                  <option value="latest_visit">最終来店日順</option>
+                  <option value="latest_nomination">最終本指名日順</option>
+                  <option value="latest_inhouse">最終場内日順</option>
+                </select>
+              </label>
             </div>
 
             <CustomerFolderList
@@ -840,10 +813,206 @@ export default function Home() {
               onOpen={(customer) => openCustomer(customer.id)}
             />
           </>
-        )}
+        ) : isAdmin && adminTab === "home" ? (
+          <>
+            <section className="homeHero">
+              <div className="eyebrow">管理者ホーム</div>
+              <h2>今日もここから</h2>
+              <p>よく使う操作だけを大きくまとめています。</p>
+            </section>
+
+            <div className="quickGrid">
+              <button className="quickCard" onClick={() => setAdminTab("search")}>
+                <span className="quickIcon">⌕</span>
+                <strong>全顧客を探す</strong>
+                <small>名前・担当・来店日などから検索</small>
+              </button>
+              <button className="quickCard" onClick={() => setAdminTab("casts")}>
+                <span className="quickIcon">♙</span>
+                <strong>キャストから探す</strong>
+                <small>キャスト → 顧客フォルダ</small>
+              </button>
+            </div>
+
+            <section className="dashboardStats">
+              <div><span>表示中キャスト</span><strong>{activeCasts.length}</strong></div>
+              <div><span>全顧客</span><strong>{customers.length}</strong></div>
+              <div><span>来店履歴</span><strong>{totalVisits}</strong></div>
+              <div><span>本指名 / 場内</span><strong>{nominationVisits} / {inhouseVisits}</strong></div>
+            </section>
+
+            <section className="homeSection">
+              <div className="sectionHeading">
+                <div>
+                  <div className="eyebrow">キャスト</div>
+                  <h3>すぐ開く</h3>
+                </div>
+                <button className="textButton" onClick={() => setAdminTab("casts")}>すべて見る ›</button>
+              </div>
+              <div className="miniCastRow">
+                {activeCasts.slice(0, 6).map((cast) => (
+                  <button key={cast.id} className="miniCast" onClick={() => openCast(cast.id)}>
+                    <span>No.{cast.login_id}</span>
+                    <strong>{cast.display_name}</strong>
+                    <small>{castCounts[cast.id] || 0}名</small>
+                  </button>
+                ))}
+              </div>
+            </section>
+          </>
+        ) : isAdmin && adminTab === "search" ? (
+          <>
+            <div className="pageHero compactHero">
+              <div>
+                <div className="eyebrow">全顧客</div>
+                <h2>検索</h2>
+                <p>顧客名・LINE・電話・メモ・担当キャスト・ログインID・来店日を横断検索。</p>
+              </div>
+            </div>
+
+            <div className="searchPanel">
+              <div className="searchFieldWithIcon largeSearch">
+                <span>⌕</span>
+                <input
+                  autoFocus
+                  value={globalQuery}
+                  onChange={(e) => setGlobalQuery(e.target.value)}
+                  placeholder="例：山田 / yuuki / 8/12"
+                />
+                {globalQuery && (
+                  <button className="clearSearch" onClick={() => setGlobalQuery("")}>×</button>
+                )}
+              </div>
+              <label className="sortControl">
+                <span>並び順</span>
+                <select value={customerSort} onChange={(e) => setCustomerSort(e.target.value)}>
+                  <option value="created">登録順</option>
+                  <option value="latest_visit">最終来店日順</option>
+                  <option value="latest_nomination">最終本指名日順</option>
+                  <option value="latest_inhouse">最終場内日順</option>
+                </select>
+              </label>
+            </div>
+
+            {!globalQuery.trim() ? (
+              <div className="searchEmptyState">
+                <span>⌕</span>
+                <strong>検索ワードを入力</strong>
+                <small>来店日は「8/12」「2026/8/12」でも検索できます。</small>
+              </div>
+            ) : (
+              <>
+                <div className="resultCount">{globalResults.length}件見つかりました</div>
+                <CustomerFolderList
+                  customers={globalResults}
+                  latestVisit={latestVisit}
+                  latestVisitByType={latestVisitByType}
+                  castName={castName}
+                  showCast
+                  showCastOnlyWhenNameMiss
+                  query={globalQuery}
+                  matchInfo={globalMatchInfo}
+                  onOpen={(customer) => openCustomer(customer.id)}
+                />
+              </>
+            )}
+          </>
+        ) : isAdmin && adminTab === "casts" ? (
+          <>
+            <div className="pageHero compactHero">
+              <div>
+                <div className="eyebrow">キャスト</div>
+                <h2>キャスト一覧</h2>
+                <p>ログインIDの小さい順。カードをタップすると顧客一覧へ。</p>
+              </div>
+              <button className="primary heroAction" onClick={() => setCastModal(true)}>＋ キャスト追加</button>
+            </div>
+
+            <div className="castGrid cleanCastGrid">
+              {activeCasts.map((cast) => (
+                <article className="castFolder cleanCastCard" key={cast.id}>
+                  <button className="folderOpen cleanFolderOpen" onClick={() => openCast(cast.id)}>
+                    <div className="castNumberBadge">
+                      <span>No.</span>
+                      <strong>{cast.login_id}</strong>
+                    </div>
+                    <div className="castFolderText">
+                      <strong>{cast.display_name}</strong>
+                      <span>{castCounts[cast.id] || 0}名の顧客</span>
+                      <small className={cast.must_change_password ? "statusPending" : "statusDone"}>
+                        {cast.must_change_password ? "初回ログイン待ち" : "利用中"}
+                      </small>
+                    </div>
+                    <div className="chevron">›</div>
+                  </button>
+                  <button
+                    className="castMoreButton"
+                    aria-label={`${cast.display_name}の管理メニュー`}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setCastActionTarget(cast);
+                    }}
+                  >•••</button>
+                </article>
+              ))}
+            </div>
+
+            {activeCasts.length === 0 && (
+              <div className="empty">「＋ キャスト追加」から最初のキャストを登録してください。</div>
+            )}
+          </>
+        ) : isAdmin ? (
+          <>
+            <div className="pageHero compactHero">
+              <div>
+                <div className="eyebrow">管理</div>
+                <h2>設定</h2>
+                <p>普段使わない管理操作をここにまとめています。</p>
+              </div>
+            </div>
+
+            <div className="settingsList">
+              <button onClick={() => setHiddenModal(true)}>
+                <div>
+                  <strong>非表示キャスト</strong>
+                  <span>顧客情報を残したまま非表示にしたキャスト</span>
+                </div>
+                <b>{hiddenCasts.length} ›</b>
+              </button>
+              <div className="settingsInfo">
+                <div><strong>ログイン中</strong><span>{profile?.display_name}</span></div>
+                <div><strong>アプリ</strong><span>Night CRM v1.5.0</span></div>
+              </div>
+              <button className="logoutSetting" onClick={signOut}>
+                <div>
+                  <strong>ログアウト</strong>
+                  <span>この端末のセッションを終了</span>
+                </div>
+                <b>›</b>
+              </button>
+            </div>
+          </>
+        ) : null}
       </main>
 
 
+
+      {isAdmin && !selectedCastId && !selectedCustomerId && !historyOpen && (
+        <nav className="bottomNav" aria-label="管理者ナビゲーション">
+          <button className={adminTab === "home" ? "active" : ""} onClick={() => setAdminTab("home")}>
+            <span>⌂</span><small>ホーム</small>
+          </button>
+          <button className={adminTab === "search" ? "active" : ""} onClick={() => setAdminTab("search")}>
+            <span>⌕</span><small>全顧客</small>
+          </button>
+          <button className={adminTab === "casts" ? "active" : ""} onClick={() => setAdminTab("casts")}>
+            <span>♙</span><small>キャスト</small>
+          </button>
+          <button className={adminTab === "settings" ? "active" : ""} onClick={() => setAdminTab("settings")}>
+            <span>⚙</span><small>設定</small>
+          </button>
+        </nav>
+      )}
 
       {visitModal && selectedCustomer && (
         <div className="modalBackdrop" onMouseDown={() => setVisitModal(false)}>
@@ -899,6 +1068,46 @@ export default function Home() {
               {busy ? "保存中…" : "来店記録を保存"}
             </button>
           </form>
+        </div>
+      )}
+
+      {castActionTarget && (
+        <div className="modalBackdrop" onMouseDown={() => setCastActionTarget(null)}>
+          <div className="modal actionSheet" onMouseDown={(e) => e.stopPropagation()}>
+            <div className="actionSheetHandle" />
+            <div className="actionSheetTitle">
+              <div className="castNumberBadge smallBadge">
+                <span>No.</span><strong>{castActionTarget.login_id}</strong>
+              </div>
+              <div>
+                <h2>{castActionTarget.display_name}</h2>
+                <p className="muted small">管理操作</p>
+              </div>
+            </div>
+            <button
+              className="sheetAction"
+              onClick={() => {
+                const cast = castActionTarget;
+                setCastActionTarget(null);
+                resetCastPassword(cast);
+              }}
+            >
+              <span>↻</span>
+              <div><strong>パスワード再発行</strong><small>新しい初期パスワードを発行</small></div>
+            </button>
+            <button
+              className="sheetAction dangerSheetAction"
+              onClick={() => {
+                const cast = castActionTarget;
+                setCastActionTarget(null);
+                hideCast(cast);
+              }}
+            >
+              <span>◌</span>
+              <div><strong>非表示にする</strong><small>顧客情報は残り、IDは再利用可能</small></div>
+            </button>
+            <button className="secondary full" onClick={() => setCastActionTarget(null)}>閉じる</button>
+          </div>
         </div>
       )}
 
@@ -1004,7 +1213,7 @@ export default function Home() {
         <div className="modalBackdrop" onMouseDown={() => setEditing(null)}>
           <form className="modal" onSubmit={saveCustomer} onMouseDown={(e) => e.stopPropagation()}>
             <div className="modalHeader">
-              <h2>{editing.id ? "顧客詳細・編集" : "顧客登録"}</h2>
+              <h2>{editing.id ? "基本情報を編集" : "顧客フォルダを作成"}</h2>
               <button type="button" className="secondary" onClick={() => setEditing(null)}>閉じる</button>
             </div>
             <div className="formGrid">
@@ -1022,10 +1231,6 @@ export default function Home() {
                 onChange={(e) => setEditing({ ...editing, rank: e.target.value })}>
                 <option>通常</option><option>見込み</option><option>VIP</option><option>休眠</option><option>注意</option>
               </select></Field>
-              <Field label="最終来店日"><input type="date" value={editing.last_visit || ""}
-                onChange={(e) => setEditing({ ...editing, last_visit: e.target.value })} /></Field>
-              <Field label="利用金額"><input type="number" min="0" value={editing.spend || ""}
-                onChange={(e) => setEditing({ ...editing, spend: e.target.value })} /></Field>
               {isAdmin && <Field label="担当キャスト"><select value={editing.owner_id}
                 onChange={(e) => setEditing({ ...editing, owner_id: e.target.value })}>
                 {activeCasts.map((item) => <option value={item.id} key={item.id}>{item.display_name}</option>)}
@@ -1092,7 +1297,7 @@ function CredentialRow({ label, value }) {
   );
 }
 
-function CustomerFolderList({ customers, latestVisit, latestVisitByType, castName, showCast, onOpen }) {
+function CustomerFolderList({ customers, latestVisit, latestVisitByType, castName, showCast, showCastOnlyWhenNameMiss = false, query = "", matchInfo, onOpen }) {
   if (customers.length === 0) {
     return <div className="empty">該当する顧客がありません。</div>;
   }
@@ -1115,14 +1320,18 @@ function CustomerFolderList({ customers, latestVisit, latestVisitByType, castNam
             <div className="customerFolderIcon">▰</div>
             <div className="customerFolderText">
               <strong>{customer.name}</strong>
-              {showCast && <span>担当：{castName(customer.owner_id)}</span>}
-              <small>
-                最終来店：{latest ? formatDate(latest.visited_at) : "未登録"}
-                {latest ? `（${latestType}）` : ""}
-              </small>
+              {showCast && (!showCastOnlyWhenNameMiss || !matchInfo?.(customer, query)?.nameMatched) && (
+                <span>担当キャスト：{castName(customer.owner_id)}</span>
+              )}
+              <div className="latestVisitLine">
+                <span className={`visitKind ${latestType === "本指名" ? "nomination" : latestType === "場内" ? "inhouse" : ""}`}>
+                  {latestType}
+                </span>
+                <small>{latest ? formatDate(latest.visited_at) : "来店未登録"}</small>
+              </div>
               <small className="subVisitInfo">
-                本指名：{latestNomination ? formatDate(latestNomination.visited_at) : "なし"} ／
-                場内：{latestInhouse ? formatDate(latestInhouse.visited_at) : "なし"}
+                本指名 {latestNomination ? formatDate(latestNomination.visited_at) : "なし"} ・
+                場内 {latestInhouse ? formatDate(latestInhouse.visited_at) : "なし"}
               </small>
             </div>
             <div className="chevron">›</div>
