@@ -1,27 +1,35 @@
-# Night CRM v1.3.1
+# Night CRM v1.4.0
 
-## 修正内容
-- 管理者がメールアドレスでログインできない不具合を修正
-- キャストはこれまで通り1〜3桁の数字IDでログイン
-- 管理者は実在メールアドレスでログイン
-- ログイン欄は以下の両方に対応
-  - キャスト：例 `82`
-  - 管理者：例 `yamamoto@example.com`
+## 今回の追加
+- 顧客名をフォルダとして表示
+- 顧客フォルダを開くと「最終来店日・最終使用金額・最終備考」を表示
+- 「＋ 来店記録を追加」
+  - 来店日
+  - その日の使用金額
+  - その日の備考
+- 「累計来店履歴を見る」
+- 来店履歴は新しい順に蓄積
+- 左端から右へスワイプで1画面戻る
+- 戻るボタンも残す
+- 管理者の全体検索から顧客フォルダを開ける
 
 ## 更新手順
 1. ZIPを展開
-2. GitHubの既存 `night-crm` リポジトリを開く
+2. GitHubの既存 `night-crm` を開く
 3. 右上の `＋` → `Upload files`
-4. 展開した `night-crm-v1.3.1` フォルダの中身を全部アップロード
-5. コメントに `Update to v1.3.1` と入力
+4. `night-crm-v1.4.0` フォルダの中身を全部アップロード
+5. Commit message：`Update to v1.4.0`
 6. `Commit changes`
-7. Vercelの `Deployments` で一番上が `Ready` になるまで待つ
-8. Night CRMを強制再読み込み
+7. Vercel → `Deployments` → 最新が `Ready` になるまで待つ
+8. Night CRMを再読み込み
    - Mac：Command + Shift + R
+   - iPhone：Safariで再読み込み
 
-## 今回不要な作業
-- Supabase SQLの追加なし
-- Vercel環境変数の追加なし
+## 今回不要
+- Supabase SQL追加なし
+- Vercel環境変数追加なし
 
-前の安定版：v1.3.0
-今回の修正版：v1.3.1
+既存の `visit_histories` テーブルを使用します。
+
+前の安定版：v1.3.1
+今回の試用版：v1.4.0

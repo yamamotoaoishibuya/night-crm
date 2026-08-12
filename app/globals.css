@@ -79,3 +79,37 @@ h1,h2{margin:0}.globalSearch{position:sticky;top:72px;z-index:19;padding:11px 16
   .hiddenCastItem{grid-template-columns:60px 1fr}
   .hiddenCastItem .primary{grid-column:1/-1;width:100%}
 }
+
+.customerFolderGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}
+.customerFolder{width:100%;display:grid;grid-template-columns:46px 1fr auto;align-items:center;gap:12px;text-align:left;border:1px solid var(--line);background:linear-gradient(145deg,#102743,#0d1b2e);color:var(--text);padding:16px;border-radius:17px}
+.customerFolderIcon{font-size:34px;color:#64adff;line-height:1}
+.customerFolderText{display:flex;flex-direction:column;gap:4px;min-width:0}
+.customerFolderText strong{font-size:18px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.customerFolderText span,.customerFolderText small{color:var(--muted);font-size:13px}
+.customerDetailHeader,.historyHeader{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:6px 0 16px}
+.summaryCard{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:16px;background:rgba(13,27,46,.94);border:1px solid var(--line);border-radius:18px}
+.summaryItem{display:flex;flex-direction:column;gap:6px;padding:12px;background:#081625;border-radius:14px}
+.summaryItem span{font-size:12px;color:var(--muted)}
+.summaryItem strong{font-size:18px;line-height:1.5}
+.summaryMemo{grid-column:1/-1}
+.customerActionGrid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:14px 0}
+.basicInfoCard{margin-top:14px;padding:16px;background:rgba(13,27,46,.94);border:1px solid var(--line);border-radius:18px}
+.basicInfoCard h3{margin:0 0 10px}
+.infoRow{display:grid;grid-template-columns:140px 1fr;gap:12px;padding:11px 0;border-bottom:1px solid rgba(36,59,88,.6)}
+.infoRow:last-child{border-bottom:0}
+.infoRow span{color:var(--muted);font-size:13px}
+.infoRow strong{font-weight:650;overflow-wrap:anywhere}
+.historyList{display:grid;gap:11px}
+.historyCard{padding:15px;background:rgba(13,27,46,.94);border:1px solid var(--line);border-radius:17px}
+.historyTop{display:flex;justify-content:space-between;gap:10px;align-items:center}
+.historyTop strong{font-size:17px}
+.historyTop span{font-weight:800;color:#b9dcff}
+.historyCard p{margin:10px 0 0;color:#d7e3f3;line-height:1.65;white-space:pre-wrap}
+@media(max-width:680px){
+  .customerFolderGrid{grid-template-columns:1fr}
+  .customerDetailHeader,.historyHeader{align-items:flex-start}
+  .summaryCard{grid-template-columns:1fr}
+  .summaryMemo{grid-column:auto}
+  .customerActionGrid{grid-template-columns:1fr}
+  .infoRow{grid-template-columns:1fr;gap:5px}
+}

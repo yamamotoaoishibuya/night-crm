@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../lib/supabase";
 
 const emptyCustomer = {
@@ -15,12 +15,17 @@ export default function Home() {
   const [profile, setProfile] = useState(null);
   const [profiles, setProfiles] = useState([]);
   const [customers, setCustomers] = useState([]);
+  const [visits, setVisits] = useState([]);
   const [login, setLogin] = useState("");
   const [password, setPassword] = useState("");
   const [globalQuery, setGlobalQuery] = useState("");
   const [castQuery, setCastQuery] = useState("");
   const [selectedCastId, setSelectedCastId] = useState("");
+  const [selectedCustomerId, setSelectedCustomerId] = useState("");
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [editing, setEditing] = useState(null);
+  const [visitModal, setVisitModal] = useState(false);
+  const [visitDraft, setVisitDraft] = useState({ visited_at: "", amount: "", memo: "" });
   const [castModal, setCastModal] = useState(false);
   const [newCast, setNewCast] = useState(emptyCast);
   const [credentialModal, setCredentialModal] = useState(null);
@@ -30,6 +35,8 @@ export default function Home() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  const touchStartX = useRef(null);
+  const touchStartY = useRef(null);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
@@ -43,7 +50,10 @@ export default function Home() {
       setProfile(null);
       setProfiles([]);
       setCustomers([]);
+      setVisits([]);
       setSelectedCastId("");
+      setSelectedCustomerId("");
+      setHistoryOpen(false);
     }
   }, [session]);
 
@@ -86,7 +96,7 @@ export default function Home() {
 
     setProfiles(sortedPeople);
     if (me.role === "cast") setSelectedCastId(me.id);
-    await loadCustomers();
+    await Promise.all([loadCustomers(), loadVisits()]);
     setBusy(false);
   }
 
@@ -98,6 +108,16 @@ export default function Home() {
 
     if (error) setMessage("顧客データを取得できませんでした。");
     else setCustomers(data || []);
+  }
+
+  async function loadVisits() {
+    const { data, error } = await supabase
+      .from("visit_histories")
+      .select("*")
+      .order("visited_at", { ascending: false });
+
+    if (error) setMessage("来店履歴を取得できませんでした。");
+    else setVisits(data || []);
   }
 
   async function signIn(event) {
@@ -173,6 +193,16 @@ export default function Home() {
     return item.is_active ? item.display_name : `${item.display_name}（非表示）`;
   }
 
+  function customerVisits(customerId) {
+    return visits
+      .filter((visit) => visit.customer_id === customerId)
+      .sort((a, b) => new Date(b.visited_at) - new Date(a.visited_at));
+  }
+
+  function latestVisit(customerId) {
+    return customerVisits(customerId)[0] || null;
+  }
+
   const globalResults = useMemo(() => {
     const word = globalQuery.trim().toLowerCase();
     if (!word) return [];
@@ -185,6 +215,7 @@ export default function Home() {
   }, [customers, globalQuery, profiles]);
 
   const selectedCast = profiles.find((item) => item.id === selectedCastId);
+  const selectedCustomer = customers.find((item) => item.id === selectedCustomerId);
 
   const selectedCustomers = useMemo(() => {
     const word = castQuery.trim().toLowerCase();
@@ -199,9 +230,59 @@ export default function Home() {
 
   function openCast(id) {
     setSelectedCastId(id);
+    setSelectedCustomerId("");
+    setHistoryOpen(false);
     setCastQuery("");
     setGlobalQuery("");
     setMessage("");
+  }
+
+  function openCustomer(id) {
+    setSelectedCustomerId(id);
+    setHistoryOpen(false);
+    setGlobalQuery("");
+    setMessage("");
+  }
+
+  function goBack() {
+    if (editing || visitModal || castModal || credentialModal || passwordModal || hiddenModal) return;
+
+    if (historyOpen) {
+      setHistoryOpen(false);
+      return;
+    }
+
+    if (selectedCustomerId) {
+      setSelectedCustomerId("");
+      return;
+    }
+
+    if (isAdmin && selectedCastId) {
+      setSelectedCastId("");
+    }
+  }
+
+  function handleTouchStart(event) {
+    const touch = event.touches?.[0];
+    if (!touch) return;
+    touchStartX.current = touch.clientX;
+    touchStartY.current = touch.clientY;
+  }
+
+  function handleTouchEnd(event) {
+    if (touchStartX.current === null || touchStartY.current === null) return;
+    const touch = event.changedTouches?.[0];
+    if (!touch) return;
+
+    const deltaX = touch.clientX - touchStartX.current;
+    const deltaY = Math.abs(touch.clientY - touchStartY.current);
+
+    if (touchStartX.current <= 35 && deltaX >= 80 && deltaY <= 70) {
+      goBack();
+    }
+
+    touchStartX.current = null;
+    touchStartY.current = null;
   }
 
   function openNewCustomer() {
@@ -211,6 +292,44 @@ export default function Home() {
       return;
     }
     setEditing({ ...emptyCustomer, owner_id: ownerId });
+  }
+
+  async function addVisit(event) {
+    event.preventDefault();
+
+    if (!selectedCustomer) return;
+    if (!visitDraft.visited_at) {
+      setMessage("来店日を入力してください。");
+      return;
+    }
+
+    setBusy(true);
+    setMessage("");
+
+    const visitedAt = new Date(`${visitDraft.visited_at}T12:00:00`).toISOString();
+
+    const payload = {
+      customer_id: selectedCustomer.id,
+      owner_id: selectedCustomer.owner_id,
+      visited_at: visitedAt,
+      amount: Number(visitDraft.amount || 0),
+      visit_type: "通常",
+      memo: visitDraft.memo || null,
+      created_by: profile.id
+    };
+
+    const { error } = await supabase.from("visit_histories").insert(payload);
+
+    if (error) {
+      setMessage(`来店履歴を保存できませんでした：${error.message}`);
+    } else {
+      setVisitModal(false);
+      setVisitDraft({ visited_at: "", amount: "", memo: "" });
+      setMessage("来店記録を追加しました。");
+      await loadVisits();
+    }
+
+    setBusy(false);
   }
 
   async function createCast(event) {
@@ -486,7 +605,7 @@ export default function Home() {
   const showingGlobalResults = isAdmin && globalQuery.trim();
 
   return (
-    <div>
+    <div onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
       <header>
         <div>
           <h1>{isAdmin ? "キャスト別 顧客管理" : "自分の顧客"}</h1>
@@ -502,7 +621,7 @@ export default function Home() {
         </div>
       </header>
 
-      {isAdmin && (
+      {isAdmin && !selectedCustomerId && (
         <section className="globalSearch">
           <input value={globalQuery} onChange={(e) => setGlobalQuery(e.target.value)}
             placeholder="全顧客を検索（名前・LINE・電話・メモ・担当キャスト・ログインID）" />
@@ -512,14 +631,43 @@ export default function Home() {
       <main className="content">
         {message && <div className="notice">{message}</div>}
 
-        {showingGlobalResults ? (
+        {historyOpen && selectedCustomer ? (
+          <HistoryView
+            customer={selectedCustomer}
+            visits={customerVisits(selectedCustomer.id)}
+            onBack={() => setHistoryOpen(false)}
+          />
+        ) : selectedCustomer ? (
+          <CustomerOverview
+            customer={selectedCustomer}
+            latest={latestVisit(selectedCustomer.id)}
+            visits={customerVisits(selectedCustomer.id)}
+            castName={castName}
+            onBack={() => setSelectedCustomerId("")}
+            onAddVisit={() => {
+              setVisitDraft({
+                visited_at: new Date().toISOString().slice(0, 10),
+                amount: "",
+                memo: ""
+              });
+              setVisitModal(true);
+            }}
+            onHistory={() => setHistoryOpen(true)}
+            onEdit={() => setEditing({ ...selectedCustomer })}
+          />
+        ) : showingGlobalResults ? (
           <>
             <div className="sectionTitle">
               <div><h2>全体検索結果</h2><span className="muted">{globalResults.length}件</span></div>
               <button className="secondary" onClick={() => setGlobalQuery("")}>閉じる</button>
             </div>
-            <CustomerList customers={globalResults} castName={castName} showCast
-              onEdit={(customer) => setEditing({ ...customer })} />
+            <CustomerFolderList
+              customers={globalResults}
+              latestVisit={latestVisit}
+              castName={castName}
+              showCast
+              onOpen={(customer) => openCustomer(customer.id)}
+            />
           </>
         ) : !selectedCastId && isAdmin ? (
           <>
@@ -586,12 +734,64 @@ export default function Home() {
                 placeholder="このキャストの顧客を検索" />
             </div>
 
-            <CustomerList customers={selectedCustomers} castName={castName} showCast={false}
-              onEdit={(customer) => setEditing({ ...customer })} />
+            <CustomerFolderList
+              customers={selectedCustomers}
+              latestVisit={latestVisit}
+              castName={castName}
+              showCast={false}
+              onOpen={(customer) => openCustomer(customer.id)}
+            />
           </>
         )}
       </main>
 
+
+
+      {visitModal && selectedCustomer && (
+        <div className="modalBackdrop" onMouseDown={() => setVisitModal(false)}>
+          <form className="modal smallModal" onSubmit={addVisit} onMouseDown={(e) => e.stopPropagation()}>
+            <div className="modalHeader">
+              <h2>来店記録を追加</h2>
+              <button type="button" className="secondary" onClick={() => setVisitModal(false)}>
+                閉じる
+              </button>
+            </div>
+
+            <p className="muted">{selectedCustomer.name}</p>
+
+            <Field label="来店日">
+              <input
+                type="date"
+                value={visitDraft.visited_at}
+                onChange={(e) => setVisitDraft({ ...visitDraft, visited_at: e.target.value })}
+              />
+            </Field>
+
+            <Field label="その日の使用金額">
+              <input
+                type="number"
+                min="0"
+                inputMode="numeric"
+                value={visitDraft.amount}
+                onChange={(e) => setVisitDraft({ ...visitDraft, amount: e.target.value })}
+                placeholder="例：80000"
+              />
+            </Field>
+
+            <Field label="その日の備考">
+              <textarea
+                value={visitDraft.memo}
+                onChange={(e) => setVisitDraft({ ...visitDraft, memo: e.target.value })}
+                placeholder="例：同僚2名と来店。次回は月末予定。"
+              />
+            </Field>
+
+            <button className="primary full" disabled={busy}>
+              {busy ? "保存中…" : "来店記録を保存"}
+            </button>
+          </form>
+        </div>
+      )}
 
       {hiddenModal && (
         <div className="modalBackdrop" onMouseDown={() => setHiddenModal(false)}>
@@ -783,29 +983,131 @@ function CredentialRow({ label, value }) {
   );
 }
 
-function CustomerList({ customers, castName, showCast, onEdit }) {
-  if (customers.length === 0) return <div className="empty">該当する顧客がありません。</div>;
-  return <div className="list">{customers.map((customer) => (
-    <article className="customerCard" key={customer.id}>
-      <div className="customerTop">
+function CustomerFolderList({ customers, latestVisit, castName, showCast, onOpen }) {
+  if (customers.length === 0) {
+    return <div className="empty">該当する顧客がありません。</div>;
+  }
+
+  return (
+    <div className="customerFolderGrid">
+      {customers.map((customer) => {
+        const latest = latestVisit(customer.id);
+
+        return (
+          <button className="customerFolder" key={customer.id} onClick={() => onOpen(customer)}>
+            <div className="customerFolderIcon">▰</div>
+            <div className="customerFolderText">
+              <strong>{customer.name}</strong>
+              {showCast && <span>担当：{castName(customer.owner_id)}</span>}
+              <small>最終来店：{latest ? formatDate(latest.visited_at) : "未登録"}</small>
+            </div>
+            <div className="chevron">›</div>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function CustomerOverview({ customer, latest, visits, castName, onBack, onAddVisit, onHistory, onEdit }) {
+  return (
+    <>
+      <button className="backButton" onClick={onBack}>‹ 顧客一覧</button>
+
+      <div className="customerDetailHeader">
         <div>
-          <div className="customerName">{customer.name}</div>
-          {showCast && <div className="ownerBadge">担当：{castName(customer.owner_id)}</div>}
+          <h2>{customer.name}</h2>
+          <span className="muted">担当：{castName(customer.owner_id)}</span>
         </div>
-        <button className="secondary" onClick={() => onEdit(customer)}>詳細・編集</button>
+        <button className="secondary" onClick={onEdit}>基本情報を編集</button>
       </div>
-      <div className="meta">
-        最終来店：{customer.last_visit || "未登録"}　LINE：{customer.line_name || "未登録"}<br />
-        電話：{customer.phone || "未登録"}　利用金額：¥{Number(customer.spend || 0).toLocaleString()}
+
+      <section className="summaryCard">
+        <div className="summaryItem">
+          <span>最終来店日</span>
+          <strong>{latest ? formatDate(latest.visited_at) : "未登録"}</strong>
+        </div>
+
+        <div className="summaryItem">
+          <span>最終使用金額</span>
+          <strong>{latest ? `¥${Number(latest.amount || 0).toLocaleString()}` : "未登録"}</strong>
+        </div>
+
+        <div className="summaryItem summaryMemo">
+          <span>最終備考</span>
+          <strong>{latest?.memo || "未登録"}</strong>
+        </div>
+      </section>
+
+      <div className="customerActionGrid">
+        <button className="primary" onClick={onAddVisit}>＋ 来店記録を追加</button>
+        <button className="secondary" onClick={onHistory}>
+          累計来店履歴を見る（{visits.length}件）
+        </button>
       </div>
-      <div className="tags"><span>{customer.rank}</span>
-        {customer.job && <span>{customer.job}</span>}
-        {customer.favorite_drink && <span>{customer.favorite_drink}</span>}
+
+      <section className="basicInfoCard">
+        <h3>基本情報</h3>
+        <InfoRow label="LINE名" value={customer.line_name || "未登録"} />
+        <InfoRow label="電話番号" value={customer.phone || "未登録"} />
+        <InfoRow label="職業・勤務先" value={customer.job || "未登録"} />
+        <InfoRow label="誕生日" value={customer.birthday || "未登録"} />
+        <InfoRow label="好きなお酒" value={customer.favorite_drink || "未登録"} />
+        <InfoRow label="ランク" value={customer.rank || "通常"} />
+        <InfoRow label="基本メモ" value={customer.memo || "未登録"} />
+      </section>
+    </>
+  );
+}
+
+function HistoryView({ customer, visits, onBack }) {
+  return (
+    <>
+      <button className="backButton" onClick={onBack}>‹ {customer.name}</button>
+
+      <div className="historyHeader">
+        <div>
+          <h2>{customer.name}｜累計来店履歴</h2>
+          <span className="muted">{visits.length}件</span>
+        </div>
       </div>
-    </article>
-  ))}</div>;
+
+      {visits.length === 0 ? (
+        <div className="empty">まだ来店履歴がありません。</div>
+      ) : (
+        <div className="historyList">
+          {visits.map((visit) => (
+            <article className="historyCard" key={visit.id}>
+              <div className="historyTop">
+                <strong>{formatDate(visit.visited_at)}</strong>
+                <span>¥{Number(visit.amount || 0).toLocaleString()}</span>
+              </div>
+              <p>{visit.memo || "備考なし"}</p>
+            </article>
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
+function InfoRow({ label, value }) {
+  return (
+    <div className="infoRow">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
 }
 
 function Field({ label, children }) {
   return <label className="field"><span>{label}</span>{children}</label>;
+}
+
+
+function formatDate(value) {
+  if (!value) return "未登録";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString("ja-JP");
 }
