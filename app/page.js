@@ -15,6 +15,20 @@ const emptyCustomer = {
 
 const emptyCast = { displayName: "", loginId: "" };
 
+async function runWithTimeout(promise, message, timeoutMs = 15000) {
+  let timerId;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timerId = setTimeout(() => reject(new Error(message)), timeoutMs);
+      })
+    ]);
+  } finally {
+    if (timerId) clearTimeout(timerId);
+  }
+}
+
 export default function Home() {
   const [session, setSession] = useState(null);
   const [profile, setProfile] = useState(null);
@@ -282,7 +296,7 @@ export default function Home() {
     return customerVisits(customerId)[0] || null;
   }
 
-  function firstVisit(customerId) {
+  function getFirstVisitRecord(customerId) {
     const list = customerVisits(customerId);
     return list.length
       ? [...list].sort((a, b) => new Date(a.visited_at) - new Date(b.visited_at))[0]
@@ -1010,21 +1024,15 @@ export default function Home() {
       Object.entries(payload).filter(([, value]) => value !== undefined)
     );
 
-    function withTimeout(promise, message) {
-      return Promise.race([
-        promise,
-        new Promise((_, reject) => {
-          setTimeout(() => reject(new Error(message)), 15000);
-        })
-      ]);
-    }
-
     setBusy(true);
     setMessage("");
 
+    let saveStage = "保存開始";
+
     try {
       if (!isNewCustomer) {
-        const customerResult = await withTimeout(
+        saveStage = "顧客基本情報を更新";
+        const customerResult = await runWithTimeout(
           supabase
             .from("customers")
             .update(cleanPayload)
@@ -1036,9 +1044,10 @@ export default function Home() {
 
         if (customerResult?.error) throw customerResult.error;
 
-        const earliest = firstVisit(editing.id);
+        saveStage = "初回来店データを取得";
+        const earliestVisitRecord = getFirstVisitRecord(editing.id);
 
-        if (earliest) {
+        if (earliestVisitRecord) {
           const firstPatch = {
             visit_type: editing.initial_visit_type,
             companions: initialCompanions
@@ -1049,11 +1058,12 @@ export default function Home() {
               new Date(`${editing.initial_visit_date}T12:00:00`).toISOString();
           }
 
-          const firstResult = await withTimeout(
+          saveStage = "初回来店情報を更新";
+          const firstResult = await runWithTimeout(
             supabase
               .from("visit_histories")
               .update(firstPatch)
-              .eq("id", earliest.id)
+              .eq("id", earliestVisitRecord.id)
               .select("id")
               .single(),
             "初回来店情報の保存がタイムアウトしました。通信状態を確認してもう一度お試しください。"
@@ -1062,13 +1072,15 @@ export default function Home() {
           if (firstResult?.error) throw firstResult.error;
         }
 
+        saveStage = "更新後データを再取得";
         setEditing(null);
         await Promise.all([loadCustomers(), loadVisits()]);
         setMessage("顧客基本情報と初回来店情報を更新しました。");
         return;
       }
 
-      const createdResult = await withTimeout(
+      saveStage = "新規顧客を作成";
+      const createdResult = await runWithTimeout(
         supabase
           .from("customers")
           .insert(cleanPayload)
@@ -1084,7 +1096,8 @@ export default function Home() {
         throw new Error("顧客フォルダを作成できませんでした。");
       }
 
-      const firstVisit = {
+      saveStage = "初回来店情報を作成";
+      const firstVisitPayload = {
         customer_id: created.id,
         owner_id: created.owner_id,
         visited_at: new Date(`${editing.initial_visit_date}T12:00:00`).toISOString(),
@@ -1095,10 +1108,11 @@ export default function Home() {
         created_by: profile.id
       };
 
-      const visitResult = await withTimeout(
+      saveStage = "初回来店情報を保存";
+      const visitResult = await runWithTimeout(
         supabase
           .from("visit_histories")
-          .insert(firstVisit)
+          .insert(firstVisitPayload)
           .select("id")
           .single(),
         "初回来店情報の保存がタイムアウトしました。通信状態を確認してもう一度お試しください。"
@@ -1128,7 +1142,7 @@ export default function Home() {
         error?.hint ||
         "不明なエラー";
 
-      setMessage(`保存できませんでした：${detail}`);
+      setMessage(`保存できませんでした（${saveStage}）：${detail}`);
     } finally {
       setBusy(false);
     }
@@ -1203,7 +1217,7 @@ export default function Home() {
     <div>
       <header className="appHeader">
         <div>
-          <div className="appBrand">Night CRM</div>
+          <div><div className="appBrand">Night CRM</div><div className="buildVersion">v1.6.8</div></div>
           <div className="headerContext">
             {selectedCustomer
               ? selectedCustomer.name
@@ -1264,7 +1278,7 @@ export default function Home() {
               });
             }}
             onEdit={() => {
-              const earliest = firstVisit(selectedCustomer.id);
+              const earliest = getFirstVisitRecord(selectedCustomer.id);
               setEditing({
                 ...selectedCustomer,
                 initial_visit_date: earliest?.visited_at
@@ -1496,7 +1510,7 @@ export default function Home() {
               </button>
               <div className="settingsInfo">
                 <div><strong>ログイン中</strong><span>{profile?.display_name}</span></div>
-                <div><strong>アプリ</strong><span>Night CRM v1.6.5</span></div>
+                <div><strong>アプリ</strong><span>Night CRM v1.6.8</span></div>
               </div>
               <button onClick={copyAppUrl}>
                 <div>
