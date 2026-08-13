@@ -1070,6 +1070,29 @@ export default function Home() {
           );
 
           if (firstResult?.error) throw firstResult.error;
+        } else if (editing.initial_visit_date) {
+          const initialVisitPayload = {
+            customer_id: editing.id,
+            owner_id: cleanPayload.owner_id,
+            visited_at: new Date(`${editing.initial_visit_date}T12:00:00`).toISOString(),
+            amount: Number(editing.initial_visit_amount || 0),
+            visit_type: editing.initial_visit_type,
+            memo: editing.initial_visit_memo || null,
+            companions: initialCompanions,
+            created_by: profile.id
+          };
+
+          saveStage = "初回来店履歴を新規作成";
+          const firstCreateResult = await runWithTimeout(
+            supabase
+              .from("visit_histories")
+              .insert(initialVisitPayload)
+              .select("id")
+              .single(),
+            "初回来店履歴の作成がタイムアウトしました。通信状態を確認してもう一度お試しください。"
+          );
+
+          if (firstCreateResult?.error) throw firstCreateResult.error;
         }
 
         saveStage = "更新後データを再取得";
@@ -1217,7 +1240,7 @@ export default function Home() {
     <div>
       <header className="appHeader">
         <div>
-          <div><div className="appBrand">Night CRM</div><div className="buildVersion">v1.6.8</div></div>
+          <div><div className="appBrand">Night CRM</div><div className="buildVersion">v1.6.9</div></div>
           <div className="headerContext">
             {selectedCustomer
               ? selectedCustomer.name
@@ -1510,7 +1533,7 @@ export default function Home() {
               </button>
               <div className="settingsInfo">
                 <div><strong>ログイン中</strong><span>{profile?.display_name}</span></div>
-                <div><strong>アプリ</strong><span>Night CRM v1.6.8</span></div>
+                <div><strong>アプリ</strong><span>Night CRM v1.6.9</span></div>
               </div>
               <button onClick={copyAppUrl}>
                 <div>
