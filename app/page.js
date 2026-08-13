@@ -1299,7 +1299,7 @@ export default function Home() {
     <div>
       <header className="appHeader">
         <div>
-          <div><div className="appBrand">Night CRM</div><div className="buildVersion">v1.6.10</div></div>
+          <div><div className="appBrand">Night CRM</div><div className="buildVersion">v1.6.12</div></div>
           <div className="headerContext">
             {selectedCustomer
               ? selectedCustomer.name
@@ -1414,6 +1414,7 @@ export default function Home() {
               customers={selectedCustomers}
               latestVisit={latestVisit}
               latestVisitByType={latestVisitByType}
+              visitCount={(customerId) => customerVisits(customerId).length}
               castName={castName}
               showCast={false}
               onOpen={(customer) => openCustomer(customer.id)}
@@ -1448,6 +1449,7 @@ export default function Home() {
                   items={globalResults}
                   onOpenCustomer={(customer) => openCustomer(customer.id)}
                   castName={castName}
+                  query={globalQuery}
                 />
               </>
             ) : (
@@ -1524,6 +1526,7 @@ export default function Home() {
                   items={globalResults}
                   onOpenCustomer={(customer) => openCustomer(customer.id)}
                   castName={castName}
+                  query={globalQuery}
                 />
               </>
             )}
@@ -1592,7 +1595,7 @@ export default function Home() {
               </button>
               <div className="settingsInfo">
                 <div><strong>ログイン中</strong><span>{profile?.display_name}</span></div>
-                <div><strong>アプリ</strong><span>Night CRM v1.6.10</span></div>
+                <div><strong>アプリ</strong><span>Night CRM v1.6.12</span></div>
               </div>
               <button onClick={copyAppUrl}>
                 <div>
@@ -2159,7 +2162,43 @@ function CompanionEditor({
   );
 }
 
-function UniversalSearchResults({ items, onOpenCustomer, castName }) {
+function highlightSearchText(value, rawQuery) {
+  const text = String(value ?? "");
+  const query = String(rawQuery ?? "").trim();
+
+  if (!query) return text;
+
+  const lowerText = text.toLowerCase();
+  const lowerQuery = query.toLowerCase();
+  const parts = [];
+  let start = 0;
+  let key = 0;
+
+  while (start < text.length) {
+    const index = lowerText.indexOf(lowerQuery, start);
+
+    if (index === -1) {
+      parts.push(text.slice(start));
+      break;
+    }
+
+    if (index > start) {
+      parts.push(text.slice(start, index));
+    }
+
+    parts.push(
+      <mark className="searchMatch" key={`match-${key++}`}>
+        {text.slice(index, index + query.length)}
+      </mark>
+    );
+
+    start = index + query.length;
+  }
+
+  return parts.length ? parts : text;
+}
+
+function UniversalSearchResults({ items, onOpenCustomer, castName, query }) {
   if (items.length === 0) {
     return <div className="empty">該当するデータがありません。</div>;
   }
@@ -2177,8 +2216,12 @@ function UniversalSearchResults({ items, onOpenCustomer, castName }) {
           >
             <div className="resultCustomerTop">
               <div>
-                <strong>{customer.name}</strong>
-                <span>担当：{castName(customer.owner_id)}</span>
+                <div className="resultNameLine">
+                  <strong>{highlightSearchText(customer.name, query)}</strong>
+                  <strong className="resultOwnerName">
+                    担当:{highlightSearchText(castName(customer.owner_id), query)}
+                  </strong>
+                </div>
               </div>
               <div className="chevron">›</div>
             </div>
@@ -2188,14 +2231,18 @@ function UniversalSearchResults({ items, onOpenCustomer, castName }) {
                 <div className="hitReason" key={`${reason.label}-${index}`}>
                   <span className="hitLabel">{reason.label}</span>
                   <div className="hitValueWrap">
-                    <strong>{reason.value}</strong>
+                    <strong>{highlightSearchText(reason.value, query)}</strong>
                     {reason.visitDate && (
-                      <small>来店日：{formatDate(reason.visitDate)}</small>
+                      <small>
+                        来店日：{highlightSearchText(formatDate(reason.visitDate), query)}
+                      </small>
                     )}
                     {reason.companionType && (
                       <small>
-                        {reason.companionType}
-                        {reason.companionCast ? `：${reason.companionCast}` : ""}
+                        {highlightSearchText(reason.companionType, query)}
+                        {reason.companionCast ? (
+                          <>：{highlightSearchText(reason.companionCast, query)}</>
+                        ) : ""}
                       </small>
                     )}
                   </div>
@@ -2215,7 +2262,7 @@ function UniversalSearchResults({ items, onOpenCustomer, castName }) {
   );
 }
 
-function CustomerFolderList({ customers, latestVisit, latestVisitByType, castName, showCast, showCastOnlyWhenNameMiss = false, query = "", matchInfo, onOpen }) {
+function CustomerFolderList({ customers, latestVisit, latestVisitByType, visitCount, castName, showCast, showCastOnlyWhenNameMiss = false, query = "", matchInfo, onOpen }) {
   if (customers.length === 0) {
     return <div className="empty">該当する顧客がありません。</div>;
   }
@@ -2250,6 +2297,9 @@ function CustomerFolderList({ customers, latestVisit, latestVisitByType, castNam
               <small className="subVisitInfo">
                 本指名 {latestNomination ? formatDate(latestNomination.visited_at) : "なし"} ・
                 場内 {latestInhouse ? formatDate(latestInhouse.visited_at) : "なし"}
+              </small>
+              <small className="visitCountInfo">
+                累計来店 {visitCount ? visitCount(customer.id) : 0}回
               </small>
             </div>
             <div className="chevron">›</div>
