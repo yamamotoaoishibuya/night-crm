@@ -942,13 +942,16 @@ export default function Home() {
 
   async function saveCustomer(event) {
     event.preventDefault();
-    setBusy(true);
-    setMessage("");
+
+    if (!editing) {
+      setMessage("編集データを取得できませんでした。画面を再読み込みしてください。");
+      return;
+    }
 
     const isNewCustomer = !editing.id;
 
     const payload = {
-      name: editing.name.trim(),
+      name: String(editing.name || "").trim(),
       line_name: editing.line_name || null,
       phone: editing.phone || null,
       job: editing.job || null,
@@ -964,23 +967,19 @@ export default function Home() {
 
     if (!payload.name) {
       setMessage("顧客名を入力してください。");
-      setBusy(false);
       return;
     }
 
     if (isNewCustomer && !editing.initial_visit_date) {
       setMessage("初回来店日を入力してください。");
-      setBusy(false);
       return;
     }
 
     if (
-      isNewCustomer &&
       editing.initial_visit_type !== "本指名" &&
       editing.initial_visit_type !== "場内"
     ) {
       setMessage("初回の指名種別を「本指名」か「場内」から選んでください。");
-      setBusy(false);
       return;
     }
 
@@ -996,111 +995,143 @@ export default function Home() {
       }))
       .filter((item) => item.name);
 
-    if (isNewCustomer) {
-      const missingInitialCast = initialCompanions.find(
-        (item) =>
-          (item.type === "本指名" || item.type === "場内") &&
-          !item.cast_name
-      );
+    const missingInitialCast = initialCompanions.find(
+      (item) =>
+        (item.type === "本指名" || item.type === "場内") &&
+        !item.cast_name
+    );
 
-      if (missingInitialCast) {
-        setMessage(`${missingInitialCast.name}さんの指名キャスト名を入力してください。`);
-        setBusy(false);
-        return;
-      }
+    if (missingInitialCast) {
+      setMessage(`${missingInitialCast.name}さんの指名キャスト名を入力してください。`);
+      return;
     }
 
     const cleanPayload = Object.fromEntries(
       Object.entries(payload).filter(([, value]) => value !== undefined)
     );
 
-    if (!isNewCustomer) {
-      const { error } = await supabase
-        .from("customers")
-        .update(cleanPayload)
-        .eq("id", editing.id);
+    function withTimeout(promise, message) {
+      return Promise.race([
+        promise,
+        new Promise((_, reject) => {
+          setTimeout(() => reject(new Error(message)), 15000);
+        })
+      ]);
+    }
 
-      if (error) {
-        setMessage(`保存できませんでした：${error.message}`);
-        setBusy(false);
+    setBusy(true);
+    setMessage("");
+
+    try {
+      if (!isNewCustomer) {
+        const customerResult = await withTimeout(
+          supabase
+            .from("customers")
+            .update(cleanPayload)
+            .eq("id", editing.id)
+            .select("id")
+            .single(),
+          "顧客基本情報の保存がタイムアウトしました。通信状態を確認してもう一度お試しください。"
+        );
+
+        if (customerResult?.error) throw customerResult.error;
+
+        const earliest = firstVisit(editing.id);
+
+        if (earliest) {
+          const firstPatch = {
+            visit_type: editing.initial_visit_type,
+            companions: initialCompanions
+          };
+
+          if (editing.initial_visit_date) {
+            firstPatch.visited_at =
+              new Date(`${editing.initial_visit_date}T12:00:00`).toISOString();
+          }
+
+          const firstResult = await withTimeout(
+            supabase
+              .from("visit_histories")
+              .update(firstPatch)
+              .eq("id", earliest.id)
+              .select("id")
+              .single(),
+            "初回来店情報の保存がタイムアウトしました。通信状態を確認してもう一度お試しください。"
+          );
+
+          if (firstResult?.error) throw firstResult.error;
+        }
+
+        setEditing(null);
+        await Promise.all([loadCustomers(), loadVisits()]);
+        setMessage("顧客基本情報と初回来店情報を更新しました。");
         return;
       }
 
-      const earliest = firstVisit(editing.id);
-      if (earliest && editing.initial_visit_type) {
-        const firstPatch = {
-          visit_type: editing.initial_visit_type,
-          companions: initialCompanions
-        };
-        if (editing.initial_visit_date) {
-          firstPatch.visited_at =
-            new Date(`${editing.initial_visit_date}T12:00:00`).toISOString();
-        }
+      const createdResult = await withTimeout(
+        supabase
+          .from("customers")
+          .insert(cleanPayload)
+          .select("id, owner_id")
+          .single(),
+        "顧客フォルダ作成がタイムアウトしました。通信状態を確認してもう一度お試しください。"
+      );
 
-        const { error: firstError } = await supabase
+      if (createdResult?.error) throw createdResult.error;
+
+      const created = createdResult.data;
+      if (!created?.id) {
+        throw new Error("顧客フォルダを作成できませんでした。");
+      }
+
+      const firstVisit = {
+        customer_id: created.id,
+        owner_id: created.owner_id,
+        visited_at: new Date(`${editing.initial_visit_date}T12:00:00`).toISOString(),
+        amount: Number(editing.initial_visit_amount || 0),
+        visit_type: editing.initial_visit_type,
+        memo: editing.initial_visit_memo || null,
+        companions: initialCompanions,
+        created_by: profile.id
+      };
+
+      const visitResult = await withTimeout(
+        supabase
           .from("visit_histories")
-          .update(firstPatch)
-          .eq("id", earliest.id);
+          .insert(firstVisit)
+          .select("id")
+          .single(),
+        "初回来店情報の保存がタイムアウトしました。通信状態を確認してもう一度お試しください。"
+      );
 
-        if (firstError) {
-          setMessage(`基本情報は保存しましたが、初回来店情報を更新できませんでした：${firstError.message}`);
-          setBusy(false);
-          return;
-        }
+      if (visitResult?.error) {
+        await supabase.from("customers").delete().eq("id", created.id);
+        throw visitResult.error;
       }
 
       setEditing(null);
-      setMessage("顧客基本情報を更新しました。");
+      setSelectedCustomerId(created.id);
+      pushHistory({
+        view: "customer",
+        castId: created.owner_id,
+        customerId: created.id
+      });
+
       await Promise.all([loadCustomers(), loadVisits()]);
+      setMessage("顧客フォルダと初回来店情報を登録しました。");
+    } catch (error) {
+      console.error("saveCustomer failed", error);
+
+      const detail =
+        error?.message ||
+        error?.details ||
+        error?.hint ||
+        "不明なエラー";
+
+      setMessage(`保存できませんでした：${detail}`);
+    } finally {
       setBusy(false);
-      return;
     }
-
-    const { data: created, error: customerError } = await supabase
-      .from("customers")
-      .insert(cleanPayload)
-      .select("id, owner_id")
-      .single();
-
-    if (customerError || !created?.id) {
-      setMessage(`顧客フォルダを作成できませんでした：${customerError?.message || "不明なエラー"}`);
-      setBusy(false);
-      return;
-    }
-
-    const firstVisit = {
-      customer_id: created.id,
-      owner_id: created.owner_id,
-      visited_at: new Date(`${editing.initial_visit_date}T12:00:00`).toISOString(),
-      amount: Number(editing.initial_visit_amount || 0),
-      visit_type: editing.initial_visit_type,
-      memo: editing.initial_visit_memo || null,
-      companions: initialCompanions,
-      created_by: profile.id
-    };
-
-    const { error: visitError } = await supabase
-      .from("visit_histories")
-      .insert(firstVisit);
-
-    if (visitError) {
-      // Avoid leaving a half-created customer when the first visit fails.
-      await supabase.from("customers").delete().eq("id", created.id);
-      setMessage(`初回来店情報を保存できませんでした：${visitError.message}`);
-      setBusy(false);
-      return;
-    }
-
-    setEditing(null);
-    setSelectedCustomerId(created.id);
-    pushHistory({
-      view: "customer",
-      castId: created.owner_id,
-      customerId: created.id
-    });
-    setMessage("顧客フォルダと初回来店情報を登録しました。");
-    await Promise.all([loadCustomers(), loadVisits()]);
-    setBusy(false);
   }
 
   async function deleteCustomer() {
@@ -1465,7 +1496,7 @@ export default function Home() {
               </button>
               <div className="settingsInfo">
                 <div><strong>ログイン中</strong><span>{profile?.display_name}</span></div>
-                <div><strong>アプリ</strong><span>Night CRM v1.6.4</span></div>
+                <div><strong>アプリ</strong><span>Night CRM v1.6.5</span></div>
               </div>
               <button onClick={copyAppUrl}>
                 <div>
@@ -1713,11 +1744,11 @@ export default function Home() {
       )}
 
       {editing && (
-        <div className="modalBackdrop" onMouseDown={() => setEditing(null)}>
+        <div className="modalBackdrop" onMouseDown={() => { setEditing(null); setBusy(false); }}>
           <form className="modal" onSubmit={saveCustomer} onMouseDown={(e) => e.stopPropagation()}>
             <div className="modalHeader">
               <h2>{editing.id ? "基本情報を編集" : "顧客フォルダを作成"}</h2>
-              <button type="button" className="secondary" onClick={() => setEditing(null)}>閉じる</button>
+              <button type="button" className="secondary" onClick={() => { setEditing(null); setBusy(false); }}>閉じる</button>
             </div>
             <div className="formGrid">
               <Field label="顧客名・ニックネーム"><input value={editing.name}
