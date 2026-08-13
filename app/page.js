@@ -1064,12 +1064,21 @@ export default function Home() {
               .from("visit_histories")
               .update(firstPatch)
               .eq("id", earliestVisitRecord.id)
-              .select("id")
+              .select("*")
               .single(),
             "初回来店情報の保存がタイムアウトしました。通信状態を確認してもう一度お試しください。"
           );
 
           if (firstResult?.error) throw firstResult.error;
+          if (!firstResult?.data?.id) {
+            throw new Error("更新後の初回来店履歴を確認できませんでした。");
+          }
+
+          setVisits((current) =>
+            current.map((item) =>
+              item.id === firstResult.data.id ? firstResult.data : item
+            )
+          );
         } else if (editing.initial_visit_date) {
           const initialVisitPayload = {
             customer_id: editing.id,
@@ -1087,17 +1096,67 @@ export default function Home() {
             supabase
               .from("visit_histories")
               .insert(initialVisitPayload)
-              .select("id")
+              .select("*")
               .single(),
             "初回来店履歴の作成がタイムアウトしました。通信状態を確認してもう一度お試しください。"
           );
 
           if (firstCreateResult?.error) throw firstCreateResult.error;
+          if (!firstCreateResult?.data?.id) {
+            throw new Error("作成した初回来店履歴のIDを取得できませんでした。");
+          }
+
+          saveStage = "作成した初回来店履歴を確認";
+          const verifyResult = await runWithTimeout(
+            supabase
+              .from("visit_histories")
+              .select("*")
+              .eq("id", firstCreateResult.data.id)
+              .single(),
+            "作成した初回来店履歴の確認がタイムアウトしました。"
+          );
+
+          if (verifyResult?.error) throw verifyResult.error;
+          if (!verifyResult?.data?.id) {
+            throw new Error("作成した初回来店履歴を読み戻せませんでした。");
+          }
+
+          setVisits((current) => {
+            const withoutSame = current.filter(
+              (item) => item.id !== verifyResult.data.id
+            );
+            return [verifyResult.data, ...withoutSame];
+          });
         }
 
         saveStage = "更新後データを再取得";
         setEditing(null);
-        await Promise.all([loadCustomers(), loadVisits()]);
+
+        const [customerReload, visitReload] = await Promise.all([
+          supabase
+            .from("customers")
+            .select("*")
+            .order("created_at", { ascending: true }),
+          supabase
+            .from("visit_histories")
+            .select("*")
+            .order("visited_at", { ascending: false })
+        ]);
+
+        if (customerReload.error) throw customerReload.error;
+        if (visitReload.error) throw visitReload.error;
+
+        setCustomers(customerReload.data || []);
+        setVisits(visitReload.data || []);
+
+        const savedVisitExists = (visitReload.data || []).some(
+          (item) => item.customer_id === editing.id
+        );
+
+        if (editing.initial_visit_date && !savedVisitExists) {
+          throw new Error("保存後の来店履歴が一覧に反映されていません。");
+        }
+
         setMessage("顧客基本情報と初回来店情報を更新しました。");
         return;
       }
@@ -1240,7 +1299,7 @@ export default function Home() {
     <div>
       <header className="appHeader">
         <div>
-          <div><div className="appBrand">Night CRM</div><div className="buildVersion">v1.6.9</div></div>
+          <div><div className="appBrand">Night CRM</div><div className="buildVersion">v1.6.10</div></div>
           <div className="headerContext">
             {selectedCustomer
               ? selectedCustomer.name
@@ -1533,7 +1592,7 @@ export default function Home() {
               </button>
               <div className="settingsInfo">
                 <div><strong>ログイン中</strong><span>{profile?.display_name}</span></div>
-                <div><strong>アプリ</strong><span>Night CRM v1.6.9</span></div>
+                <div><strong>アプリ</strong><span>Night CRM v1.6.10</span></div>
               </div>
               <button onClick={copyAppUrl}>
                 <div>
