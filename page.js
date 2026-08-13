@@ -282,7 +282,7 @@ export default function Home() {
     return customerVisits(customerId)[0] || null;
   }
 
-  function firstVisit(customerId) {
+  function getFirstVisitRecord(customerId) {
     const list = customerVisits(customerId);
     return list.length
       ? [...list].sort((a, b) => new Date(a.visited_at) - new Date(b.visited_at))[0]
@@ -1036,7 +1036,7 @@ export default function Home() {
 
         if (customerResult?.error) throw customerResult.error;
 
-        const earliest = firstVisit(editing.id);
+        const earliest = getFirstVisitRecord(editing.id);
 
         if (earliest) {
           const firstPatch = {
@@ -1203,7 +1203,7 @@ export default function Home() {
     <div>
       <header className="appHeader">
         <div>
-          <div className="appBrand">Night CRM</div>
+          <div><div className="appBrand">Night CRM</div><div className="buildVersion">v1.6.7</div></div>
           <div className="headerContext">
             {selectedCustomer
               ? selectedCustomer.name
@@ -1264,7 +1264,7 @@ export default function Home() {
               });
             }}
             onEdit={() => {
-              const earliest = firstVisit(selectedCustomer.id);
+              const earliest = getFirstVisitRecord(selectedCustomer.id);
               setEditing({
                 ...selectedCustomer,
                 initial_visit_date: earliest?.visited_at
@@ -1496,7 +1496,7 @@ export default function Home() {
               </button>
               <div className="settingsInfo">
                 <div><strong>ログイン中</strong><span>{profile?.display_name}</span></div>
-                <div><strong>アプリ</strong><span>Night CRM v1.6.6</span></div>
+                <div><strong>アプリ</strong><span>Night CRM v1.6.7</span></div>
               </div>
               <button onClick={copyAppUrl}>
                 <div>
